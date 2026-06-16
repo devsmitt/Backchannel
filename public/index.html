@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<title>backchannel</title>
+<style>
+  /*
+    BACKCHANNEL — single-file terminal client.
+    Three states, driven by token presence + server {presence} pushes:
+      SIGNED-OUT (.signedout) -> paste-your-token sign-in.
+      NOT BUILDING (.idle)    -> dark "you're not building" hush. Socket stays open.
+      PRESENT (.present)      -> rooms revealed: channel switcher, scrollable log, input.
+    The token is a SECRET — taken once via paste, kept in localStorage, NEVER in a URL.
+    Aesthetic carried from The Void: dark, monospace, low-res, phosphor-green + soft-gray.
+  */
+
+  :root {
+    --bg:        #000000;            /* pure black */
+    --room-bg:   #050605;            /* near-black when present */
+    --phosphor:  #7dffb0;           /* phosphor-green — this is YOU */
+    --phosphor-dim: #3a6e51;        /* dimmer green for chrome */
+    --other:     #cbd2cd;           /* soft light-gray — every other builder */
+    --other-dim: #99a39c;           /* dimmer gray for their handles */
+    --text:      #cbd2cd;           /* default body text */
+    --text-dim:  #5d6a63;           /* faint hush */
+    --self-dim:  #4f8e6a;
+    --line:      rgba(125,255,176,0.12);
+    --fade-ms:   1100ms;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  body {
+    font-family: "SFMono-Regular", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--text);
+    -webkit-font-smoothing: none;        /* lean into low-res */
+    text-rendering: optimizeSpeed;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ---- Shell ----------------------------------------------------------- */
+
+  #shell {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    transition: background var(--fade-ms) ease;
+  }
+  body.present #shell {
+    background:
+      radial-gradient(ellipse 46% 38% at 50% 44%, rgba(150,255,205,0.06), transparent 62%),
+      var(--room-bg);
+  }
+  body:not(.present) #shell {
+    background:
+      radial-gradient(ellipse 42% 34% at 50% 46%, rgba(150,255,205,0.04), transparent 62%),
+      var(--bg);
+  }
+
+  /* generic centred overlay used by signed-out + idle states */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 1.5em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 700ms ease;
+    z-index: 4;
+  }
+  body.signedout #signin { opacity: 1; pointer-events: auto; }
+  body.idle      #idle    { opacity: 1; pointer-events: auto; }
+
+  /* ---- Sign-in (SIGNED-OUT) ------------------------------------------- */
+
+  #signin .brand {
+    color: var(--phosphor);
+    opacity: 0.85;
+    letter-spacing: 0.34em;
+    font-size: 13px;
+    margin-bottom: 1.6em;
+    text-shadow: 0 0 12px rgba(125,255,176,0.25);
+  }
+  #signin .ask {
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    font-size: 13px;
+    margin-bottom: 1.1em;
+    max-width: 40ch;
+  }
+  .tokenbox {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    max-width: 92vw;
+    width: 420px;
+    border: 1px solid var(--line);
+    background: rgba(125,255,176,0.03);
+    padding: 0.55em 0.7em;
+  }
+  .tokenbox::before {
+    content: "\203a";
+    color: var(--phosphor);
+    opacity: 0.6;
+    flex: 0 0 auto;
+  }
+  #tokenInput {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--phosphor);
+    caret-color: var(--phosphor);
+    font: inherit;
+    opacity: 0.95;
+  }
+  #tokenInput::placeholder { color: var(--phosphor-dim); opacity: 0.7; }
+  #signinBtn {
+    flex: 0 0 auto;
+    background: none;
+    border: 1px solid rgba(125,255,176,0.25);
+    color: var(--phosphor);
+    font: inherit;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    padding: 0.3em 0.7em;
+    cursor: pointer;
+    opacity: 0.82;
+    transition: opacity 250ms ease, background 250ms ease;
+  }
+  #signinBtn:hover { opacity: 1; background: rgba(125,255,176,0.09); }
+  #signin .hint {
+    margin-top: 1.4em;
+    color: var(--text-dim);
+    opacity: 0.6;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    max-width: 44ch;
+    line-height: 1.7;
+  }
+  #signin .hint code {
+    color: var(--phosphor-dim);
+    background: rgba(125,255,176,0.05);
+    padding: 0.05em 0.4em;
+  }
+  #signinErr {
+    margin-top: 1.1em;
+    color: #d98a8a;
+    opacity: 0;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    transition: opacity 300ms ease;
+    min-height: 1em;
+  }
+  body.signin-error #signinErr { opacity: 0.85; }
+
+  /* ---- NOT BUILDING (idle) -------------------------------------------- */
+
+  #idle .pulse {
+    color: var(--phosphor-dim);
+    letter-spacing: 0.12em;
+    animation: breathe 4.5s ease-in-out infinite;
+  }
+  #idle .sub {
+    color: var(--text-dim);
+    opacity: 0.6;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    margin-top: 0.9em;
+    max-width: 40ch;
+  }
+  #idle .who {
+    color: var(--self-dim);
+    opacity: 0.7;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    margin-top: 2.2em;
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 0.28; }
+    50%      { opacity: 0.72; }
+  }
+
+  /* ---- PRESENT: rooms view -------------------------------------------- */
+
+  #rooms {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--fade-ms) ease;
+    z-index: 2;
+  }
+  body.present #rooms { opacity: 1; pointer-events: auto; }
+
+  /* left channel switcher */
+  #channels {
+    flex: 0 0 auto;
+    width: 200px;
+    max-width: 38vw;
+    border-right: 1px solid var(--line);
+    padding: 2.4vh 0 2vh;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15em;
+    overflow-y: auto;
+  }
+  #channels .me {
+    color: var(--phosphor);
+    opacity: 0.8;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    padding: 0 1.2em 1.4em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #channels .me::before { content: "\25CF "; opacity: 0.7; }
+  .chan {
+    background: none;
+    border: none;
+    border-left: 2px solid transparent;
+    font: inherit;
+    text-align: left;
+    color: var(--other-dim);
+    opacity: 0.7;
+    padding: 0.35em 1.2em;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: opacity 200ms ease, color 200ms ease, background 200ms ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chan:hover { opacity: 0.95; }
+  .chan.active {
+    color: var(--phosphor);
+    opacity: 0.95;
+    border-left-color: var(--phosphor);
+    background: rgba(125,255,176,0.05);
+  }
+
+  /* right side: log + input */
+  #main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 2.4vh 0 2vh;
+    position: relative;
+  }
+  #conn {
+    position: absolute;
+    top: 1vh;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--self-dim);
+    opacity: 0;
+    transition: opacity 500ms ease;
+    pointer-events: none;
+    z-index: 5;
+  }
+  body.reconnecting #conn { opacity: 0.6; }
+
+  #log {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0 1.6em 1.1em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.22em;
+    scrollbar-width: thin;
+    scrollbar-color: var(--phosphor-dim) transparent;
+  }
+  /* Spacer eats free space so few messages rest at the bottom, but collapses
+     on overflow so the top stays scrollable. (NOT justify-content:flex-end —
+     that clips the overflow unreachably.) */
+  #logspacer { flex: 1 1 auto; min-height: 0; }
+  #log::-webkit-scrollbar { width: 8px; }
+  #log::-webkit-scrollbar-thumb { background: rgba(203,210,205,0.14); }
+
+  .msg {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    animation: lineIn 500ms ease both;
+  }
+  @keyframes lineIn { from { opacity: 0; } to { opacity: 1; } }
+  .msg .handle { color: var(--other-dim); opacity: 0.95; }
+  .msg .body   { color: var(--other);     opacity: 0.85; }
+  .msg.self .handle { color: var(--phosphor); opacity: 0.9; }
+  .msg.self .body   { color: var(--phosphor); opacity: 0.82; }
+
+  #emptyhint {
+    position: absolute;
+    top: 50%;
+    left: 200px;
+    right: 0;
+    transform: translateY(-50%);
+    text-align: center;
+    color: var(--text-dim);
+    opacity: 0.4;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+    z-index: 3;
+    animation: breathe 5s ease-in-out infinite;
+    padding: 0 1em;
+  }
+
+  /* input row */
+  #inputrow {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.2em 1.6em 0;
+  }
+  #prompt {
+    color: var(--phosphor);
+    opacity: 0.85;
+    user-select: none;
+    flex: 0 0 auto;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  #field {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    white-space: pre;
+  }
+  #mirror {
+    color: var(--phosphor);
+    opacity: 0.9;
+    white-space: pre;
+    flex: 0 0 auto;
+  }
+  #cursor {
+    flex: 0 0 auto;
+    width: 0.55em;
+    height: 1.05em;
+    background: var(--phosphor);
+    opacity: 0.85;
+    margin-left: 1px;
+    animation: blink 1.05s steps(1) infinite;
+  }
+  @keyframes blink { 0%, 50% { opacity: 0.85; } 50.01%, 100% { opacity: 0; } }
+  #say {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: transparent;
+    caret-color: transparent;
+    font: inherit;
+    padding: 0;
+    margin: 0;
+  }
+  body:not(.present) #cursor { display: none; }
+
+  /* ---- CRT flavor: scanlines + vignette (present only) ---------------- */
+  #crt {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+  }
+  #crt::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.22) 3px, rgba(0,0,0,0.22) 3px);
+    opacity: 0;
+    transition: opacity var(--fade-ms) ease;
+  }
+  #crt::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center,
+      rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+    opacity: 0;
+    transition: opacity var(--fade-ms) ease;
+  }
+  body.present #crt::before { opacity: 1; animation: flicker 7s steps(60) infinite; }
+  body.present #crt::after  { opacity: 1; }
+  @keyframes flicker {
+    0%, 100% { opacity: 1; } 96% { opacity: 1; }
+    97% { opacity: 0.93; } 98% { opacity: 1; }
+  }
+
+  @media (max-width: 560px) {
+    #channels { width: 150px; }
+    #emptyhint { left: 150px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #crt::before { animation: none; }
+    .msg, #emptyhint, #idle .pulse { animation: none; }
+    #cursor { animation: none; opacity: 0.8; }
+  }
+</style>
+</head>
+<body class="signedout">
+
+  <div id="shell">
+    <!-- PRESENT: the rooms (revealed only when building) -->
+    <div id="rooms">
+      <nav id="channels">
+        <div class="me" id="meHandle">&nbsp;</div>
+        <!-- channel buttons injected here -->
+      </nav>
+      <div id="main">
+        <div id="conn">reconnecting</div>
+        <div id="emptyhint">nothing here yet. someone may be building, silent.</div>
+        <div id="log">
+          <div id="logspacer"></div>
+        </div>
+        <div id="inputrow">
+          <span id="prompt">&nbsp;</span>
+          <div id="field">
+            <span id="mirror"></span><span id="cursor"></span>
+            <input id="say" type="text" autocomplete="off" autocorrect="off"
+                   autocapitalize="off" spellcheck="false" maxlength="1000" disabled />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SIGNED-OUT: paste-token sign-in -->
+  <div id="signin" class="overlay">
+    <div class="brand">backchannel</div>
+    <div class="ask">paste your backchannel token</div>
+    <div class="tokenbox">
+      <input id="tokenInput" type="password" autocomplete="off" autocorrect="off"
+             autocapitalize="off" spellcheck="false" placeholder="token" />
+      <button id="signinBtn" type="button">enter</button>
+    </div>
+    <div id="signinErr">&nbsp;</div>
+    <div class="hint">
+      no token? run the installer, then find it at<br>
+      <code>cat ~/.config/backchannel/token</code>
+    </div>
+  </div>
+
+  <!-- NOT BUILDING: dark hush -->
+  <div id="idle" class="overlay">
+    <div class="pulse">you're not building</div>
+    <div class="sub">backchannel opens when your agent does</div>
+    <div class="who" id="idleWho">&nbsp;</div>
+  </div>
+
+  <div id="crt"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---- Identity token -----------------------------------------------------
+  // The token is a SECRET. It is taken once via the paste-in sign-in and kept
+  // in localStorage. It is NEVER read from or written to the URL.
+  const TOKEN_KEY = "backchannel-token";
+  let token = "";
+  try { token = (localStorage.getItem(TOKEN_KEY) || "").trim(); } catch (_) {}
+
+  // ---- DOM refs -----------------------------------------------------------
+  const body        = document.body;
+  const channelsEl  = document.getElementById("channels");
+  const meHandleEl  = document.getElementById("meHandle");
+  const idleWhoEl   = document.getElementById("idleWho");
+  const logEl       = document.getElementById("log");
+  const emptyHint   = document.getElementById("emptyhint");
+  const promptEl    = document.getElementById("prompt");
+  const mirrorEl    = document.getElementById("mirror");
+  const fieldEl     = document.getElementById("field");
+  const sayEl       = document.getElementById("say");
+  const tokenInput  = document.getElementById("tokenInput");
+  const signinBtn   = document.getElementById("signinBtn");
+
+  // ---- State --------------------------------------------------------------
+  let ws            = null;
+  let present       = false;     // is this user currently building?
+  let username      = "";        // resolved server-side from the token
+  let rooms         = [];        // [{slug,name}]
+  let currentRoom   = null;      // slug of the active channel
+  let signedIn      = false;     // have we gotten a {welcome}?
+
+  let reconnectDelay = 500;      // backoff base (ms)
+  const RECONNECT_MAX = 15000;
+  let heartbeatTimer = null;
+  let pongWatchdog   = null;
+  let manualClose    = false;
+
+  // ---- View state machine -------------------------------------------------
+  // signedout -> idle (signed in, not building) -> present (building).
+  function showSignedOut() {
+    signedIn = false;
+    body.classList.add("signedout");
+    body.classList.remove("idle", "present");
+    setTimeout(() => { try { tokenInput.focus(); } catch (_) {} }, 200);
+  }
+  function showIdle() {
+    body.classList.remove("signedout", "present");
+    body.classList.add("idle");
+    // exit the input cleanly if we were mid-type
+    sayEl.value = ""; syncCursor(); sayEl.disabled = true;
+    try { sayEl.blur(); } catch (_) {}
+  }
+  function showPresent() {
+    body.classList.remove("signedout", "idle");
+    body.classList.add("present");
+    sayEl.disabled = false;
+    if (document.visibilityState === "visible" && matchMedia("(pointer:fine)").matches) {
+      setTimeout(() => { try { sayEl.focus(); } catch (_) {} }, 250);
+    }
+  }
+
+  // Apply a presence flip. On becoming present we (re)join the current room to
+  // load its fresh history; on losing it we fade back to the idle hush.
+  function applyPresence(isPresent) {
+    present = !!isPresent;
+    if (present) {
+      showPresent();
+      const room = currentRoom || (rooms[0] && rooms[0].slug);
+      if (room) joinRoom(room);
+    } else if (signedIn) {
+      showIdle();
+    }
+  }
+
+  // ---- Channel switcher ---------------------------------------------------
+  function renderChannels() {
+    // wipe existing channel buttons (keep the .me handle line)
+    channelsEl.querySelectorAll(".chan").forEach((n) => n.remove());
+    rooms.forEach((r) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chan" + (r.slug === currentRoom ? " active" : "");
+      b.textContent = r.name || ("#" + r.slug);
+      b.dataset.slug = r.slug;
+      b.addEventListener("click", () => {
+        if (r.slug !== currentRoom) joinRoom(r.slug);
+      });
+      channelsEl.appendChild(b);
+    });
+  }
+  function markActiveChannel() {
+    channelsEl.querySelectorAll(".chan").forEach((b) => {
+      b.classList.toggle("active", b.dataset.slug === currentRoom);
+    });
+  }
+
+  function joinRoom(slug) {
+    currentRoom = slug;
+    markActiveChannel();
+    clearLog();
+    // history arrives async; ask the server for this room's backlog.
+    send({ type: "join", room: slug });
+  }
+
+  // ---- Rendering ----------------------------------------------------------
+  function clearLog() {
+    logEl.querySelectorAll(".msg").forEach((n) => n.remove());
+    emptyHint.style.display = "";
+  }
+
+  function renderMsg(m, opts) {
+    emptyHint.style.display = "none";
+    const isSelf = (opts && typeof opts.self === "boolean")
+      ? opts.self
+      : (m.username === username);
+    const row = document.createElement("div");
+    row.className = "msg" + (isSelf ? " self" : "");
+
+    const h = document.createElement("span");
+    h.className = "handle";
+    h.textContent = m.username || "?";
+
+    const b = document.createElement("span");
+    b.className = "body";
+    b.textContent = "  " + (m.body == null ? "" : m.body);
+
+    row.appendChild(h);
+    row.appendChild(b);
+    logEl.appendChild(row);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // History: last 50, oldest first. Render in order, then pin to bottom.
+  function renderHistory(room, messages) {
+    if (room !== currentRoom) return;   // stale (user switched fast)
+    clearLog();
+    (messages || []).forEach((m) => renderMsg(m, { self: m.username === username }));
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // ---- WebSocket ----------------------------------------------------------
+  function wsUrl() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return proto + "//" + location.host + "/ws";
+  }
+
+  function connect() {
+    if (!token) { showSignedOut(); return; }
+    manualClose = false;
+    let sock;
+    try { sock = new WebSocket(wsUrl()); }
+    catch (_) { scheduleReconnect(); return; }
+    ws = sock;
+
+    sock.onopen = () => {
+      reconnectDelay = 500;
+      body.classList.remove("reconnecting");
+      send({ type: "hello", token: token });
+      startHeartbeat();
+    };
+
+    sock.onmessage = (ev) => {
+      let m;
+      try { m = JSON.parse(ev.data); } catch (_) { return; }
+      if (!m || typeof m.type !== "string") return;
+
+      // Any inbound frame proves liveness — clear the watchdog regardless of type.
+      if (pongWatchdog) { clearTimeout(pongWatchdog); pongWatchdog = null; }
+
+      switch (m.type) {
+        case "welcome": onWelcome(m); break;
+        case "presence": applyPresence(m.present); break;
+        case "history": renderHistory(m.room, m.messages); break;
+        case "msg":
+          // broadcast for a room we're watching, only while present
+          if (present && m.room === currentRoom) renderMsg(m, { self: m.self });
+          break;
+        case "denied": break;  // we sent while not present; silently ignore
+        case "error":
+          // Bad token at hello: surface the sign-in error and clear the token.
+          onAuthError(m.message);
+          break;
+        case "pong": break;
+        default: break;
+      }
+    };
+
+    sock.onclose = () => {
+      stopHeartbeat();
+      ws = null;
+      if (manualClose) return;
+      if (signedIn) body.classList.add("reconnecting");
+      scheduleReconnect();
+    };
+
+    sock.onerror = () => { try { sock.close(); } catch (_) {} };
+  }
+
+  function onWelcome(m) {
+    signedIn = true;
+    username = m.username || "";
+    rooms = Array.isArray(m.rooms) ? m.rooms : [];
+    // persist the token now that the server has accepted it
+    try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
+
+    meHandleEl.textContent = username;
+    idleWhoEl.textContent = "signed in as " + username;
+    promptEl.textContent = username;
+
+    // default to the first room if we haven't chosen one
+    if (!currentRoom && rooms[0]) currentRoom = rooms[0].slug;
+    renderChannels();
+
+    applyPresence(m.present);
+  }
+
+  function onAuthError(message) {
+    // Token rejected. Stop reconnecting on this token, wipe it, show sign-in.
+    manualClose = true;
+    try { ws && ws.close(); } catch (_) {}
+    ws = null;
+    stopHeartbeat();
+    token = "";
+    try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+    showSignedOut();
+    showSigninError(message || "that token isn't recognized");
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify(obj)); return true; } catch (_) {}
+    }
+    return false;
+  }
+
+  function scheduleReconnect() {
+    if (!token) return;   // nothing to reconnect to without a token
+    const delay = reconnectDelay;
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX);
+    setTimeout(connect, delay + Math.floor(Math.random() * 250));
+  }
+
+  // App-level heartbeat to notice half-open sockets and force a reconnect.
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      send({ type: "ping" });
+      if (pongWatchdog) clearTimeout(pongWatchdog);
+      pongWatchdog = setTimeout(() => { try { ws && ws.close(); } catch (_) {} }, 10000);
+    }, 25000);
+  }
+  function stopHeartbeat() {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (pongWatchdog)   { clearTimeout(pongWatchdog);   pongWatchdog = null; }
+  }
+
+  // ---- Sign-in (SIGNED-OUT state) -----------------------------------------
+  function showSigninError(msg) {
+    document.getElementById("signinErr").textContent = msg;
+    body.classList.add("signin-error");
+  }
+  function clearSigninError() {
+    body.classList.remove("signin-error");
+  }
+  function submitToken() {
+    const t = (tokenInput.value || "").trim();
+    if (!t) return;
+    clearSigninError();
+    token = t;
+    reconnectDelay = 500;
+    // Open the socket and hello; {welcome} persists + advances, {error} resets.
+    connect();
+  }
+  signinBtn.addEventListener("click", submitToken);
+  tokenInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); submitToken(); }
+  });
+  tokenInput.addEventListener("input", clearSigninError);
+
+  // ---- Message input (PRESENT only) ---------------------------------------
+  function syncCursor() {
+    mirrorEl.textContent = sayEl.value;
+    fieldEl.scrollLeft = fieldEl.scrollWidth;
+  }
+  sayEl.addEventListener("input", syncCursor);
+  sayEl.addEventListener("keyup", syncCursor);
+  sayEl.addEventListener("click", syncCursor);
+
+  sayEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (!present || !currentRoom) return;   // gated on building
+    const body_ = sayEl.value.trim();
+    if (!body_) return;
+    send({ type: "say", room: currentRoom, body: body_.slice(0, 1000) });
+    sayEl.value = "";
+    syncCursor();
+  });
+
+  // If the tab regains visibility and our socket is gone, reconnect now.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && token && !ws && !manualClose) {
+      reconnectDelay = 500;
+      connect();
+    }
+  });
+
+  // ---- Boot ---------------------------------------------------------------
+  if (token) {
+    connect();              // signed in already — open WS, hello, await welcome
+  } else {
+    showSignedOut();        // quiet paste-token sign-in
+  }
+})();
+</script>
+</body>
+</html>

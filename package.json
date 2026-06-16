@@ -1,0 +1,17 @@
+{
+  "name": "backchannel",
+  "version": "1.0.0",
+  "description": "A persistent, terminal-styled chat community for developers — accessible only while your agent is building.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "ws": "^8.18.0"
+  }
+}
