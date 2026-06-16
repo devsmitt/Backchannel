@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Backchannel — The Back Room</title>
+<style>
+  /*
+    BACKCHANNEL — "THE BACK ROOM"
+    A clandestine but clean operator's back room you slip into while you build.
+    Dim but WARM (not void-black), brass/amber lamp-light, crisp readable mono.
+    A reserved teal-green "LIVE" signal that ONLY appears while the gate is open
+    (i.e. while your agent is working). The gate is the hero.
+
+    All CSS + markup inline. System / safe fonts only. No external deps.
+  */
+
+  :root {
+    /* surfaces — warm charcoal, never pure black */
+    --room-0:    #16140f;   /* deepest — page edge */
+    --room-1:    #1c1a13;   /* main room surface */
+    --room-2:    #232017;   /* raised panels / rails */
+    --room-3:    #2c281c;   /* hover / input wells */
+    --hairline:  #34301f;   /* warm hairline dividers */
+    --hairline-2:#413b27;   /* stronger divider */
+
+    /* ink */
+    --ink:       #ece6d6;   /* primary text — warm bone */
+    --ink-soft:  #b6ad97;   /* secondary */
+    --ink-mute:  #837c68;   /* tertiary / timestamps */
+    --ink-faint: #5d5847;   /* faintest chrome */
+
+    /* brass — the lamp. the room's signature, used for chrome + the brand */
+    --brass:     #d8a657;
+    --brass-deep:#a87b33;
+    --brass-soft:#7a5d2c;
+    --brass-wash:rgba(216,166,87,0.10);
+
+    /* LIVE — reserved teal-green. appears ONLY when the gate is open. */
+    --live:      #58c79a;
+    --live-deep: #2f8c6a;
+    --live-wash: rgba(88,199,154,0.12);
+    --live-line: rgba(88,199,154,0.30);
+
+    /* you vs. others */
+    --you:       #e8b86a;   /* your handle reads brass-bright */
+    --other:     #cdd6cf;   /* other builders read cool bone */
+
+    --mono: "SF Mono", "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, Menlo, Consolas, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--room-0);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    min-height: 100vh;
+    padding: 36px 24px 64px;
+    /* a single warm "table lamp" wash from upper-left — grounded, not ethereal */
+    background:
+      radial-gradient(1100px 620px at 16% -8%, rgba(216,166,87,0.07), transparent 60%),
+      var(--room-0);
+  }
+
+  .page {
+    max-width: 1080px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+  }
+
+  /* ---------- page caption (mockup framing, not part of the app chrome) ---------- */
+  .caption {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .caption::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--hairline), transparent);
+  }
+
+  /* ========================================================================
+     THE BACK ROOM — present (building) state
+     ===================================================================== */
+  .room {
+    border: 1px solid var(--hairline-2);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--room-1);
+    box-shadow:
+      0 1px 0 rgba(255,240,210,0.04) inset,
+      0 24px 60px -28px rgba(0,0,0,0.8);
+  }
+
+  /* ---- top bar: identity + the LIVE gate signal ---- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 13px 18px;
+    background: var(--room-2);
+    border-bottom: 1px solid var(--hairline-2);
+  }
+
+  .wordmark {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--mono);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    font-size: 14px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  .wordmark .dot {
+    width: 9px; height: 9px; border-radius: 2px;
+    background: var(--brass);
+    box-shadow: 0 0 0 3px var(--brass-wash);
+  }
+  .wordmark b { color: var(--brass); font-weight: 600; }
+  .wordmark .sub {
+    color: var(--ink-faint);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding-left: 4px;
+  }
+
+  .topbar .spacer { flex: 1; }
+
+  .whoami {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-soft);
+    padding: 5px 11px 5px 7px;
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    background: var(--room-1);
+  }
+  .whoami .av {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--brass-soft);
+    color: #1a1710;
+    font-weight: 700; font-size: 11px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .whoami b { color: var(--you); font-weight: 600; }
+
+  /* the gate / LIVE pill — the hero signal */
+  .gate {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--live);
+    padding: 6px 13px 6px 11px;
+    border: 1px solid var(--live-line);
+    border-radius: 999px;
+    background: var(--live-wash);
+    white-space: nowrap;
+  }
+  .gate .beacon {
+    position: relative;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--live);
+    box-shadow: 0 0 0 0 rgba(88,199,154,0.55);
+    animation: pulse 2.4s ease-out infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(88,199,154,0.5); }
+    70%  { box-shadow: 0 0 0 7px rgba(88,199,154,0); }
+    100% { box-shadow: 0 0 0 0 rgba(88,199,154,0); }
+  }
+  .gate b { color: var(--live); font-weight: 600; }
+  .gate .why { color: var(--live-deep); letter-spacing: 0.02em; }
+
+  /* ---- body: channel rail + message pane ---- */
+  .body {
+    display: grid;
+    grid-template-columns: 232px 1fr;
+    min-height: 520px;
+  }
+
+  .rail {
+    background: var(--room-2);
+    border-right: 1px solid var(--hairline-2);
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .rail .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 4px 10px 10px;
+  }
+
+  .chan {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 9px 11px;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--ink-soft);
+    cursor: default;
+    border: 1px solid transparent;
+  }
+  .chan .hash { color: var(--ink-faint); font-weight: 600; }
+  .chan .meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+  }
+  .chan.active {
+    background: var(--room-1);
+    border-color: var(--hairline-2);
+    color: var(--ink);
+    box-shadow: inset 2px 0 0 var(--brass);
+  }
+  .chan.active .hash { color: var(--brass); }
+  .chan .unread {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: #1a1710;
+    background: var(--brass);
+    border-radius: 999px;
+    padding: 1px 7px;
+  }
+
+  .rail .divider {
+    height: 1px;
+    background: var(--hairline);
+    margin: 12px 8px;
+  }
+
+  /* who else is in the room right now (others also building) */
+  .present-list .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 11px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+  .present-list .pip {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--live);
+    flex: none;
+    box-shadow: 0 0 6px rgba(88,199,154,0.6);
+  }
+  .present-list .row.you b { color: var(--you); }
+
+  .rail .footnote {
+    margin-top: auto;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--ink-faint);
+    padding: 12px 10px 2px;
+    letter-spacing: 0.01em;
+  }
+
+  /* ---- message pane ---- */
+  .pane {
+    display: flex;
+    flex-direction: column;
+    background: var(--room-1);
+  }
+  .pane-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .pane-head .name {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--ink);
+  }
+  .pane-head .name .hash { color: var(--brass); }
+  .pane-head .topic {
+    font-size: 12.5px;
+    color: var(--ink-mute);
+  }
+  .pane-head .count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+
+  .log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0 14px;
+  }
+
+  /* the "history begins here" marker — the catch-up on entry */
+  .marker {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px 6px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .marker::before, .marker::after {
+    content: ""; flex: 1; height: 1px; background: var(--hairline);
+  }
+
+  .msg {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 11px;
+    padding: 7px 20px;
+  }
+  .msg:hover { background: var(--room-2); }
+  .msg .av {
+    width: 30px; height: 30px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-weight: 700; font-size: 12px;
+    margin-top: 2px;
+  }
+  .msg .body { min-width: 0; }
+  .msg .head {
+    display: flex; align-items: baseline; gap: 9px;
+    margin-bottom: 1px;
+  }
+  .msg .handle {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--other);
+  }
+  .msg .time {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+  .msg .text {
+    font-size: 14.5px;
+    line-height: 1.5;
+    color: var(--ink);
+    word-wrap: break-word;
+  }
+  .msg .text code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--room-3);
+    color: var(--brass);
+    border: 1px solid var(--hairline);
+    border-radius: 5px;
+    padding: 1px 6px;
+  }
+
+  /* your own messages — brass-tinted handle + avatar */
+  .msg.me .handle { color: var(--you); }
+  .msg.me .av { background: var(--brass-soft); color: #1a1710; }
+  /* avatar palette for other builders — muted, warm-cool mix */
+  .av.a { background: #3a4a44; color: #cfe6dc; }
+  .av.b { background: #4a4334; color: #ecd9ad; }
+  .av.c { background: #44384a; color: #e3cdec; }
+  .av.d { background: #34434a; color: #c9e2ec; }
+  .av.e { background: #4a3a38; color: #ecccc6; }
+
+  /* ---- composer + the live footer ---- */
+  .composer {
+    border-top: 1px solid var(--hairline-2);
+    background: var(--room-2);
+    padding: 13px 18px 14px;
+  }
+  .inputwell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--room-1);
+    border: 1px solid var(--hairline-2);
+    border-radius: 9px;
+    padding: 10px 13px;
+  }
+  .inputwell .chev {
+    font-family: var(--mono);
+    color: var(--brass);
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .inputwell .ph {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--ink-faint);
+    flex: 1;
+  }
+  .inputwell .caret {
+    width: 8px; height: 17px;
+    background: var(--brass);
+    margin-left: -4px;
+    animation: blink 1.1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .inputwell .send {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+
+  .livefoot {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--live);
+    letter-spacing: 0.02em;
+  }
+  .livefoot .beacon {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--live);
+    box-shadow: 0 0 0 0 rgba(88,199,154,0.5);
+    animation: pulse 2.4s ease-out infinite;
+  }
+  .livefoot .muted { color: var(--ink-faint); }
+  .livefoot .right {
+    margin-left: auto;
+    color: var(--ink-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 10px;
+  }
+
+  /* ========================================================================
+     THE DOOR — not-building state (gate closed)
+     ===================================================================== */
+  .door {
+    border: 1px solid var(--hairline-2);
+    border-radius: 12px;
+    overflow: hidden;
+    background:
+      radial-gradient(700px 300px at 50% 120%, rgba(216,166,87,0.05), transparent 60%),
+      var(--room-1);
+    box-shadow: 0 24px 60px -34px rgba(0,0,0,0.8);
+  }
+  .door .topbar { background: var(--room-1); }
+  .door .gate.shut {
+    color: var(--ink-mute);
+    border-color: var(--hairline-2);
+    background: transparent;
+  }
+  .door .gate.shut .beacon {
+    background: var(--ink-faint);
+    box-shadow: none;
+    animation: none;
+  }
+  .door .gate.shut b { color: var(--ink-soft); }
+
+  .door-body {
+    padding: 56px 28px 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 18px;
+  }
+  .door-glyph {
+    width: 60px; height: 60px;
+    border-radius: 12px;
+    border: 1px solid var(--hairline-2);
+    background: var(--room-2);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  .door-glyph .keyhole {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--brass-deep);
+    position: relative;
+  }
+  .door-glyph .keyhole::after {
+    content: ""; position: absolute;
+    left: 4px; top: 9px;
+    width: 4px; height: 11px;
+    background: var(--brass-deep);
+    border-radius: 0 0 2px 2px;
+  }
+  .door-title {
+    font-family: var(--mono);
+    font-size: 17px;
+    color: var(--ink);
+    letter-spacing: 0.01em;
+  }
+  .door-sub {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink-mute);
+    max-width: 46ch;
+  }
+  .door-sub b { color: var(--brass); font-weight: 600; }
+  .door-meta {
+    display: flex;
+    gap: 22px;
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+  }
+  .door-meta span b { color: var(--ink-soft); font-weight: 600; }
+  .door-hint {
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    border: 1px dashed var(--hairline-2);
+    border-radius: 8px;
+    padding: 9px 14px;
+    letter-spacing: 0.02em;
+  }
+  .door-hint b { color: var(--live); }
+
+  .scroll-shadow { box-shadow: inset 0 -22px 22px -22px rgba(0,0,0,0.5); }
+
+  @media (max-width: 760px) {
+    .body { grid-template-columns: 1fr; }
+    .rail { flex-direction: row; flex-wrap: wrap; border-right: none; border-bottom: 1px solid var(--hairline-2); }
+    .rail .footnote, .rail .present-list, .rail .divider, .rail .label { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ STATE 3: PRESENT (building) ============ -->
+  <div class="caption">State — present · gate open · you are building</div>
+
+  <div class="room">
+    <!-- top bar: identity + live gate -->
+    <div class="topbar">
+      <div class="wordmark">
+        <span class="dot"></span>back<b>channel</b>
+        <span class="sub">the back room</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="gate">
+        <span class="beacon"></span>
+        <b>LIVE</b>
+        <span class="why">· present while your agent works</span>
+      </div>
+      <div class="whoami">
+        <span class="av">DK</span>
+        <b>@devkit</b>
+      </div>
+    </div>
+
+    <div class="body">
+      <!-- channel rail -->
+      <aside class="rail">
+        <div class="label">Channels</div>
+        <div class="chan"><span class="hash">#</span>general<span class="meta">2m</span></div>
+        <div class="chan"><span class="hash">#</span>help<span class="unread">3</span></div>
+        <div class="chan active"><span class="hash">#</span>what-are-you-building<span class="meta">now</span></div>
+
+        <div class="divider"></div>
+
+        <div class="label">In the room now</div>
+        <div class="present-list">
+          <div class="row you"><span class="pip"></span><b>@devkit</b></div>
+          <div class="row"><span class="pip"></span>@mira.builds</div>
+          <div class="row"><span class="pip"></span>@tomas_k</div>
+          <div class="row"><span class="pip"></span>@nina-ships</div>
+          <div class="row"><span class="pip"></span>@rafa.dev</div>
+          <div class="row"><span class="pip"></span>@joon</div>
+        </div>
+
+        <div class="footnote">
+          you're in because your agent<br>is working. when it stops,<br>the door closes behind you.
+        </div>
+      </aside>
+
+      <!-- message pane -->
+      <section class="pane">
+        <div class="pane-head">
+          <span class="name"><span class="hash">#</span>what-are-you-building</span>
+          <span class="topic">ship logs, work-in-progress, what's compiling right now</span>
+          <span class="count">6 building</span>
+        </div>
+
+        <div class="log scroll-shadow">
+          <div class="marker">earlier today</div>
+
+          <div class="msg">
+            <span class="av a">MB</span>
+            <div class="body">
+              <div class="head"><span class="handle">@mira.builds</span><span class="time">2:14 pm</span></div>
+              <div class="text">finally ripping out our hand-rolled auth for a real session library. agent's mid-migration on like 40 route handlers right now, fingers crossed</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="av b">TK</span>
+            <div class="body">
+              <div class="head"><span class="handle">@tomas_k</span><span class="time">2:16 pm</span></div>
+              <div class="text">brave. last time I let it touch auth it "helpfully" disabled CSRF checks. read the diff line by line</div>
+            </div>
+          </div>
+
+          <div class="msg me">
+            <span class="av">DK</span>
+            <div class="body">
+              <div class="head"><span class="handle">@devkit</span><span class="time">2:18 pm</span></div>
+              <div class="text">+1 on reading the diff. I make it write the migration as one commit per table so I can revert a single step instead of the whole thing</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="av c">NS</span>
+            <div class="body">
+              <div class="head"><span class="handle">@nina-ships</span><span class="time">2:21 pm</span></div>
+              <div class="text">just pushed v0.4 of the CLI to npm. cold-start dropped from 900ms to 110ms after I lazy-loaded the config parser. absurd how much that one require was costing</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="av d">RD</span>
+            <div class="body">
+              <div class="head"><span class="handle">@rafa.dev</span><span class="time">2:23 pm</span></div>
+              <div class="text">110ms is great. what'd you use to find it — just <code>node --prof</code> or something fancier?</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="av c">NS</span>
+            <div class="body">
+              <div class="head"><span class="handle">@nina-ships</span><span class="time">2:24 pm</span></div>
+              <div class="text"><code>0x</code> for the flamegraph, then <code>clinic doctor</code> to confirm. the parser was eagerly compiling every schema at import time 🙃</div>
+            </div>
+          </div>
+
+          <div class="marker">live · last few minutes</div>
+
+          <div class="msg me">
+            <span class="av">DK</span>
+            <div class="body">
+              <div class="head"><span class="handle">@devkit</span><span class="time">2:31 pm</span></div>
+              <div class="text">deploy's going out now — agent's running the staging smoke suite while I wait. 38 green, 2 to go. this is exactly the dead time I'm here for</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="av e">JN</span>
+            <div class="body">
+              <div class="head"><span class="handle">@joon</span><span class="time">2:32 pm</span></div>
+              <div class="text">ha, same — mine's regenerating types off the new prisma schema. love that this place only exists while the robot's busy. keeps me off twitter</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- composer + live footer -->
+        <div class="composer">
+          <div class="inputwell">
+            <span class="chev">›</span>
+            <span class="ph">message #what-are-you-building</span><span class="caret"></span>
+            <span class="send">enter to send</span>
+          </div>
+          <div class="livefoot">
+            <span class="beacon"></span>
+            you're live — <span class="muted">posting enabled because your agent is working</span>
+            <span class="right">closes on agent stop</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+
+  <!-- ============ STATE 2: NOT BUILDING (gate closed) ============ -->
+  <div class="caption">State — not building · gate closed · the door is shut</div>
+
+  <div class="door">
+    <div class="topbar">
+      <div class="wordmark">
+        <span class="dot" style="background:var(--ink-faint);box-shadow:none;"></span>back<b style="color:var(--ink-soft)">channel</b>
+        <span class="sub">the back room</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="gate shut">
+        <span class="beacon"></span>
+        <b>CLOSED</b>
+        <span style="color:var(--ink-faint)">· not building</span>
+      </div>
+      <div class="whoami">
+        <span class="av" style="background:#3a3528;color:var(--ink-soft)">DK</span>
+        <b style="color:var(--ink-soft)">@devkit</b>
+      </div>
+    </div>
+
+    <div class="door-body">
+      <div class="door-glyph"><span class="keyhole"></span></div>
+      <div class="door-title">the room's closed until you build</div>
+      <div class="door-sub">
+        Backchannel only opens while your agent is working. Start a run and you'll
+        slip back in — straight into the conversation, right where it left off.
+      </div>
+      <div class="door-meta">
+        <span>signed in as <b>@devkit</b></span>
+        <span><b>6</b> builders in the room now</span>
+        <span><b>12</b> waiting for you on entry</span>
+      </div>
+      <div class="door-hint">
+        next prompt to your agent opens the door &nbsp;·&nbsp; <b>you go live automatically</b>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

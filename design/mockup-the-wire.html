@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>backchannel — the wire</title>
+<style>
+  /*
+    BACKCHANNEL — visual identity: "THE WIRE"
+    A newswire / teletype / dispatch feed. Messages are live dispatches filed
+    from builders in the field; you can only file while your agent is working.
+
+    Identity decisions (its own territory — NOT The Void):
+      - Paper-ish ink-dark slate, NOT pure black; no center radial glow.
+      - Editorial pairing: a clean grotesque sans for chrome + headings,
+        a crisp monospace for dispatch bodies & datelines. Real contrast,
+        comfortable sizing, no font-smoothing tricks.
+      - Signal accent = "amber wire light" (a teletype/on-air amber), with a
+        cool slate ground. The amber is reserved for the LIVE / on-air state.
+      - The GATE is the hero: an "ON AIR / FILING LIVE" wire-status bar makes
+        "you're present because your agent is working" the loudest thing on
+        screen. A distinct closed-desk state covers not-building.
+  */
+
+  :root {
+    /* ground — ink slate, paper-stained, never pure black */
+    --ink-900: #0d1014;     /* deepest ground */
+    --ink-850: #11151a;     /* panel ground */
+    --ink-800: #161b21;     /* raised surface */
+    --ink-750: #1c222a;     /* hover / inset */
+    --ink-700: #232b34;     /* hairlines lifted */
+
+    --rule:    #2a323c;     /* editorial rules / borders */
+    --rule-soft: #20262e;
+
+    /* ink on paper */
+    --paper:   #e8e6df;     /* primary text — warm newsprint white */
+    --paper-2: #b8bcc2;     /* secondary */
+    --paper-3: #7e858e;     /* tertiary / meta */
+    --paper-4: #565d66;     /* faint */
+
+    /* the wire light — amber, the LIVE signal. Reserved, never decorative. */
+    --wire:    #ffb347;     /* on-air amber */
+    --wire-dim:#c4853a;
+    --wire-deep:#7a531f;
+    --wire-glow: rgba(255,179,71,0.14);
+
+    /* your own dispatches — a cool ribbon to separate from others */
+    --self:    #6fd0c4;     /* teal-cyan, "your byline" */
+    --self-dim:#3f8079;
+
+    --closed:  #5a6b86;     /* closed-desk cool slate */
+
+    --font-sans: "Helvetica Neue", Helvetica, "Segoe UI", Arial, system-ui, sans-serif;
+    --font-mono: "SFMono-Regular", "SF Mono", "JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background:
+      /* faint horizontal newsprint ruling, very subtle */
+      repeating-linear-gradient(
+        to bottom,
+        transparent 0, transparent 27px,
+        rgba(255,255,255,0.012) 27px, rgba(255,255,255,0.012) 28px),
+      var(--ink-900);
+    color: var(--paper);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .stage {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 34px 26px 80px;
+  }
+
+  /* ---- masthead -------------------------------------------------------- */
+  .masthead {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--paper);
+    padding-bottom: 12px;
+    margin-bottom: 0;
+  }
+  .mast-left { display: flex; align-items: baseline; gap: 16px; }
+  .wordmark {
+    font-family: var(--font-sans);
+    font-weight: 800;
+    font-size: 30px;
+    letter-spacing: -0.025em;
+    line-height: 1;
+    color: var(--paper);
+  }
+  .wordmark .b { color: var(--wire); }
+  .mast-tag {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    color: var(--paper-3);
+    padding-bottom: 2px;
+  }
+  .mast-edition {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    color: var(--paper-3);
+    text-align: right;
+    line-height: 1.55;
+  }
+  .mast-edition b { color: var(--paper-2); font-weight: 600; }
+
+  /* thin spec rule under masthead */
+  .specline {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--rule);
+    padding: 7px 1px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--paper-4);
+  }
+  .specline span b { color: var(--paper-3); font-weight: 500; }
+
+  /* ---- live ticker (who's filing now) --------------------------------- */
+  .ticker {
+    display: flex;
+    align-items: stretch;
+    margin-top: 18px;
+    border: 1px solid var(--rule);
+    background: var(--ink-850);
+    overflow: hidden;
+  }
+  .ticker-label {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--wire);
+    color: #20160a;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 0 14px;
+  }
+  .ticker-label .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #20160a;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{ opacity:1; transform:scale(1);} 50%{ opacity:0.35; transform:scale(0.7);} }
+  .ticker-track {
+    flex: 1 1 auto;
+    overflow: hidden;
+    position: relative;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+  }
+  .ticker-run {
+    display: inline-flex;
+    gap: 30px;
+    padding-left: 18px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--paper-2);
+    animation: scroll-l 34s linear infinite;
+  }
+  .ticker-run .t-name { color: var(--paper); }
+  .ticker-run .t-name::before { content: "● "; color: var(--self); font-size: 9px; vertical-align: 1px; }
+  .ticker-run .t-sep { color: var(--paper-4); }
+  @keyframes scroll-l { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  /* ---- main desk layout ------------------------------------------------ */
+  .desk {
+    display: grid;
+    grid-template-columns: 218px 1fr;
+    gap: 0;
+    margin-top: 18px;
+    border: 1px solid var(--rule);
+    background: var(--ink-850);
+    min-height: 560px;
+  }
+
+  /* left rail: identity + channels */
+  .rail {
+    border-right: 1px solid var(--rule);
+    display: flex;
+    flex-direction: column;
+    background: var(--ink-900);
+  }
+  .byline {
+    padding: 16px 16px 14px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .byline .k {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--paper-4);
+    margin-bottom: 6px;
+  }
+  .byline .handle {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--self);
+    letter-spacing: -0.01em;
+  }
+  .byline .status {
+    margin-top: 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--wire);
+  }
+  .byline .status .ring {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--wire);
+    box-shadow: 0 0 0 3px var(--wire-glow);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  .rail-head {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--paper-4);
+    padding: 16px 16px 8px;
+  }
+  .chan {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 9px 16px;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    color: var(--paper-2);
+    transition: background 140ms ease, color 140ms ease;
+  }
+  .chan:hover { background: var(--ink-800); color: var(--paper); }
+  .chan .hash { color: var(--paper-4); margin-right: 1px; }
+  .chan .count {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--paper-4);
+  }
+  .chan.active {
+    background: var(--ink-800);
+    color: var(--paper);
+    border-left-color: var(--wire);
+  }
+  .chan.active .hash { color: var(--wire); }
+  .chan.active .count { color: var(--wire-dim); }
+
+  .rail-foot {
+    margin-top: auto;
+    padding: 14px 16px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1.7;
+    letter-spacing: 0.06em;
+    color: var(--paper-4);
+  }
+  .rail-foot b { color: var(--paper-3); font-weight: 500; }
+
+  /* right: the feed */
+  .feed-wrap { display: flex; flex-direction: column; min-width: 0; }
+
+  /* on-air bar — THE GATE, the hero */
+  .onair {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--rule);
+    background:
+      linear-gradient(to right, var(--wire-glow), transparent 60%),
+      var(--ink-850);
+  }
+  .onair .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--wire);
+    color: #20160a;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 5px 11px 5px 9px;
+    border-radius: 2px;
+  }
+  .onair .badge .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #20160a;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .onair .msg {
+    font-family: var(--font-sans);
+    font-size: 13px;
+    color: var(--paper);
+  }
+  .onair .msg b { color: var(--wire); font-weight: 600; }
+  .onair .sub {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    color: var(--paper-3);
+  }
+  .onair .feed-name {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--paper-3);
+  }
+  .onair .feed-name b { color: var(--paper); font-weight: 600; }
+
+  /* dispatch column */
+  .feed {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 6px 0 4px;
+  }
+  .daterule {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 22px 6px;
+  }
+  .daterule .line { flex: 1 1 auto; height: 1px; background: var(--rule-soft); }
+  .daterule .lbl {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--paper-4);
+  }
+
+  .dispatch {
+    padding: 9px 22px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .dispatch:hover { background: var(--ink-850); }
+  .dline {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    margin-bottom: 3px;
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+  }
+  .dline .who { color: var(--paper); font-weight: 600; }
+  .dline .place {
+    color: var(--paper-3);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 9.5px;
+  }
+  .dline .time { margin-left: auto; color: var(--paper-4); font-size: 10px; letter-spacing: 0.1em; }
+  .dbody {
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    line-height: 1.62;
+    color: var(--paper-2);
+    white-space: pre-wrap;
+  }
+  .dbody code {
+    background: var(--ink-800);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0.5px 5px;
+    font-size: 12.5px;
+    color: var(--paper);
+  }
+
+  /* your own dispatch — left ribbon, teal byline */
+  .dispatch.mine {
+    background: rgba(111,208,196,0.035);
+    border-left: 2px solid var(--self);
+    padding-left: 20px;
+  }
+  .dispatch.mine .dline .who { color: var(--self); }
+  .dispatch.mine .dbody { color: var(--paper); }
+
+  /* a reply / @mention thread marker */
+  .dline .re {
+    color: var(--paper-4);
+    font-size: 10px;
+  }
+  .dbody .at { color: var(--self); }
+
+  /* compose / filing row */
+  .filing {
+    border-top: 1px solid var(--rule);
+    background: var(--ink-900);
+    padding: 12px 18px 13px;
+  }
+  .filing .slug {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 8px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--paper-4);
+  }
+  .filing .slug .live {
+    color: var(--wire);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .filing .slug .live .d { width:6px;height:6px;border-radius:50%;background:var(--wire); animation:pulse 1.6s ease-in-out infinite;}
+  .filing .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--rule);
+    background: var(--ink-850);
+    padding: 10px 13px;
+    border-radius: 2px;
+  }
+  .filing .row:focus-within { border-color: var(--wire-deep); }
+  .filing .caret {
+    font-family: var(--font-mono);
+    color: var(--self);
+    font-size: 14px;
+    flex: 0 0 auto;
+  }
+  .filing .ph {
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    color: var(--paper);
+    flex: 1 1 auto;
+  }
+  .filing .ph .cur {
+    display: inline-block; width: 8px; height: 16px;
+    background: var(--self); vertical-align: -3px; margin-left: 1px;
+    animation: blink 1.05s steps(1) infinite;
+  }
+  @keyframes blink { 0%,50%{opacity:1;} 50.01%,100%{opacity:0;} }
+  .filing .send {
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #20160a;
+    background: var(--wire);
+    border: none;
+    padding: 6px 13px;
+    border-radius: 2px;
+    cursor: pointer;
+    font-weight: 700;
+  }
+  .filing .hint {
+    margin-top: 7px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    color: var(--paper-4);
+  }
+
+  /* ===== SECOND PANEL: the closed-desk / NOT BUILDING state ============ */
+  .section-tag {
+    margin: 54px 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--paper-4);
+  }
+  .section-tag .line { flex: 1 1 auto; height: 1px; background: var(--rule); }
+
+  .closed {
+    border: 1px solid var(--rule);
+    background:
+      repeating-linear-gradient(
+        135deg,
+        transparent 0, transparent 11px,
+        rgba(90,107,134,0.04) 11px, rgba(90,107,134,0.04) 12px),
+      var(--ink-900);
+    padding: 0;
+    overflow: hidden;
+  }
+  .closed .top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .closed .top .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid var(--closed);
+    color: var(--closed);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 4px 11px;
+    border-radius: 2px;
+  }
+  .closed .top .badge .sq { width: 8px; height: 8px; background: var(--closed); }
+  .closed .top .feed-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--paper-4);
+  }
+  .closed .mid {
+    padding: 52px 32px 56px;
+    text-align: center;
+  }
+  .closed .mid .stamp {
+    display: inline-block;
+    border: 2px solid var(--closed);
+    color: var(--closed);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    padding: 8px 18px;
+    transform: rotate(-3.5deg);
+    border-radius: 3px;
+    opacity: 0.85;
+  }
+  .closed .mid h3 {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: -0.02em;
+    color: var(--paper);
+    margin: 22px 0 8px;
+  }
+  .closed .mid p {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    letter-spacing: 0.04em;
+    color: var(--paper-3);
+    margin: 0 auto;
+    max-width: 46ch;
+    line-height: 1.7;
+  }
+  .closed .mid .waiting {
+    margin-top: 22px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--paper-4);
+  }
+  .closed .mid .waiting b { color: var(--self-dim); }
+  .closed .foot {
+    border-top: 1px solid var(--rule);
+    padding: 11px 18px;
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--paper-4);
+    background: var(--ink-850);
+  }
+  .closed .foot .lock { color: var(--closed); }
+  .closed .foot b { color: var(--paper-3); font-weight: 500; }
+
+  .footnote {
+    margin-top: 26px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    color: var(--paper-4);
+    text-align: center;
+    line-height: 1.7;
+  }
+
+  @media (max-width: 720px) {
+    .desk { grid-template-columns: 1fr; }
+    .rail { flex-direction: row; flex-wrap: wrap; }
+    .mast-tag { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- ===================== MASTHEAD ===================== -->
+  <div class="masthead">
+    <div class="mast-left">
+      <div class="wordmark"><span class="b">/</span>backchannel</div>
+      <div class="mast-tag">the wire · builders' dispatch</div>
+    </div>
+    <div class="mast-edition">
+      <div><b>FIELD EDITION</b> — live</div>
+      <div>fri 10 apr 2026 · 14:22 PT</div>
+    </div>
+  </div>
+  <div class="specline">
+    <span><b>access</b> &nbsp;gated by build</span>
+    <span><b>desk</b> &nbsp;3 channels open</span>
+    <span><b>filing</b> &nbsp;19 in the field</span>
+    <span><b>vol.</b> &nbsp;1 · no.&nbsp;212</span>
+  </div>
+
+  <!-- ===================== LIVE TICKER ===================== -->
+  <div class="ticker">
+    <div class="ticker-label"><span class="dot"></span>filing now</div>
+    <div class="ticker-track">
+      <div class="ticker-run">
+        <span class="t-name">@dmitt</span><span class="t-sep">filing #what-are-you-building</span>
+        <span class="t-name">@renlow</span><span class="t-sep">filing #help</span>
+        <span class="t-name">@kasey.dev</span><span class="t-sep">filing #general</span>
+        <span class="t-name">@btravo</span><span class="t-sep">filing #help</span>
+        <span class="t-name">@m_iro</span><span class="t-sep">filing #general</span>
+        <span class="t-name">@theo.k</span><span class="t-sep">filing #what-are-you-building</span>
+        <span class="t-name">@sunfish</span><span class="t-sep">filing #general</span>
+        <span class="t-name">@p.okafor</span><span class="t-sep">filing #help</span>
+        <span class="t-name">@dmitt</span><span class="t-sep">filing #what-are-you-building</span>
+        <span class="t-name">@renlow</span><span class="t-sep">filing #help</span>
+        <span class="t-name">@kasey.dev</span><span class="t-sep">filing #general</span>
+        <span class="t-name">@bravo</span><span class="t-sep">filing #help</span>
+        <span class="t-name">@m_iro</span><span class="t-sep">filing #general</span>
+        <span class="t-name">@theo.k</span><span class="t-sep">filing #what-are-you-building</span>
+        <span class="t-name">@sunfish</span><span class="t-sep">filing #general</span>
+        <span class="t-name">@p.okafor</span><span class="t-sep">filing #help</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== THE DESK (PRESENT / BUILDING) ===================== -->
+  <div class="desk">
+
+    <!-- left rail -->
+    <aside class="rail">
+      <div class="byline">
+        <div class="k">your byline</div>
+        <div class="handle">@dmitt</div>
+        <div class="status"><span class="ring"></span>on the wire</div>
+      </div>
+
+      <div class="rail-head">channels</div>
+      <div class="chan"><span><span class="hash">#</span>general</span><span class="count">204</span></div>
+      <div class="chan"><span><span class="hash">#</span>help</span><span class="count">58</span></div>
+      <div class="chan active"><span><span class="hash">#</span>what-are-you-building</span><span class="count">31</span></div>
+
+      <div class="rail-foot">
+        <b>the desk closes</b> when your<br>agent stops. you file from<br>the field, never the lobby.
+      </div>
+    </aside>
+
+    <!-- right: feed -->
+    <section class="feed-wrap">
+
+      <!-- ON AIR bar — the gate, the hero -->
+      <div class="onair">
+        <span class="badge"><span class="dot"></span>on air</span>
+        <div>
+          <div class="msg">you're live because <b>your agent is working</b></div>
+          <div class="sub">build started 6m ago · the wire stays open while it runs</div>
+        </div>
+        <div class="feed-name">desk &nbsp;<b>#what-are-you-building</b></div>
+      </div>
+
+      <!-- dispatch feed -->
+      <div class="feed">
+
+        <div class="daterule">
+          <span class="lbl">earlier today</span>
+          <span class="line"></span>
+        </div>
+
+        <div class="dispatch">
+          <div class="dline">
+            <span class="who">@theo.k</span>
+            <span class="place">SFO · field</span>
+            <span class="time">13:48</span>
+          </div>
+          <div class="dbody">shipping a little terminal dashboard for our deploy pipeline — it tails the build logs and pings me when prod goes green. third rewrite, finally happy with it.</div>
+        </div>
+
+        <div class="dispatch">
+          <div class="dline">
+            <span class="who">@kasey.dev</span>
+            <span class="place">PDX · field</span>
+            <span class="time">13:52</span>
+          </div>
+          <div class="dbody">migrating the whole app off <code>moment</code> to <code>date-fns</code>. agent's churning through 140 call sites right now. this is the most relaxed i've ever been during a migration tbh</div>
+        </div>
+
+        <div class="dispatch">
+          <div class="dline">
+            <span class="who">@renlow</span>
+            <span class="place">BER · field</span>
+            <span class="time">14:03</span>
+          </div>
+          <div class="dbody">we're launching the public beta of our markdown-to-slides tool monday. spent today writing the landing copy while the agent rebuilt the export queue. divide and conquer.</div>
+        </div>
+
+        <div class="dispatch mine">
+          <div class="dline">
+            <span class="who">@dmitt</span>
+            <span class="place">PT · field</span>
+            <span class="time">14:09</span>
+          </div>
+          <div class="dbody"><span class="at">@renlow</span> nice — how are you rendering the slides, headless chrome? we tried that for PDF export and the cold starts killed us</div>
+        </div>
+
+        <div class="daterule">
+          <span class="lbl">in the last hour</span>
+          <span class="line"></span>
+        </div>
+
+        <div class="dispatch">
+          <div class="dline">
+            <span class="who">@renlow</span>
+            <span class="re">re: @dmitt</span>
+            <span class="place">BER · field</span>
+            <span class="time">14:11</span>
+          </div>
+          <div class="dbody">yeah headless chrome but we keep one warm instance per region. cold starts were brutal until we did that. happy to share the pool config</div>
+        </div>
+
+        <div class="dispatch">
+          <div class="dline">
+            <span class="who">@sunfish</span>
+            <span class="place">TYO · field</span>
+            <span class="time">14:14</span>
+          </div>
+          <div class="dbody">finally killed a flaky test that's been red ~1 in 8 runs for two months. it was a timezone assumption in a fixture, of course it was. of course.</div>
+        </div>
+
+        <div class="dispatch">
+          <div class="dline">
+            <span class="who">@p.okafor</span>
+            <span class="place">LDN · field</span>
+            <span class="time">14:18</span>
+          </div>
+          <div class="dbody">first day letting an agent touch our rust codebase. it correctly traced a borrow-checker error three files deep that i'd have spent an hour on. cautiously impressed.</div>
+        </div>
+
+        <div class="dispatch mine">
+          <div class="dline">
+            <span class="who">@dmitt</span>
+            <span class="place">PT · field</span>
+            <span class="time">14:21</span>
+          </div>
+          <div class="dbody">shipping backchannel's sign-in flow today — paste-token, no URLs, no OAuth. agent's wiring the recovery-phrase rebind right now. filing this from inside that very build, which feels correct.</div>
+        </div>
+
+      </div>
+
+      <!-- filing row -->
+      <div class="filing">
+        <div class="slug">
+          <span class="live"><span class="d"></span>filing live</span>
+          <span>· as @dmitt to #what-are-you-building</span>
+        </div>
+        <div class="row">
+          <span class="caret">&rsaquo;</span>
+          <span class="ph">file a dispatch<span class="cur"></span></span>
+          <button class="send">send ⏎</button>
+        </div>
+        <div class="hint">enter to file · the desk closes the moment your build stops</div>
+      </div>
+
+    </section>
+  </div>
+
+  <!-- ===================== SECOND STATE: CLOSED DESK (NOT BUILDING) ===================== -->
+  <div class="section-tag">
+    <span>the gate</span>
+    <span class="line"></span>
+    <span>when you're not building</span>
+  </div>
+
+  <div class="closed">
+    <div class="top">
+      <span class="badge"><span class="sq"></span>off air</span>
+      <span class="feed-name">the desk is dark</span>
+    </div>
+    <div class="mid">
+      <div class="stamp">desk closed</div>
+      <h3>The wire opens when your agent does.</h3>
+      <p>You file from the field, never the lobby. Start a build and the desk lights up — the backlog you missed, then the live feed, then your byline goes on air.</p>
+      <div class="waiting"><b>19 builders</b> on the wire right now · you'll join them the moment you start</div>
+    </div>
+    <div class="foot">
+      <span class="lock">▣</span>
+      <span>signed in as <b>@dmitt</b> · no agent running · posting disabled until you build</span>
+    </div>
+  </div>
+
+  <div class="footnote">
+    backchannel — the wire · a side-channel for builders, open only in the cracks of real work<br>
+    no lurking · no bots · no always-on · the build is the key
+  </div>
+
+</div>
+</body>
+</html>

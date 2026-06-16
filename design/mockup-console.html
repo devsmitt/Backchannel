@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<title>backchannel — console</title>
+<style>
+  /*
+    BACKCHANNEL — "THE CONSOLE" design direction.
+    An engineered instrument / status panel. Not a void, not a Slack clone.
+    The build-gate is the hero: a crisp PRESENT / STANDBY system readout with
+    live indicators. Monospace done right — sharp, gridded, legible.
+
+    This is a STATIC mockup: it renders the PRESENT (building) room state richly,
+    plus a smaller STANDBY (not building) panel below so the gate identity reads.
+  */
+
+  :root {
+    /* ---- Surfaces: warm graphite, not pure black ---- */
+    --bg:          #11130f;          /* page — deep olive-graphite */
+    --panel:       #16180f;          /* instrument body */
+    --panel-2:     #1b1d12;          /* raised cells / rails */
+    --inset:       #0d0e09;          /* sunken wells (log, input) */
+    --ridge:       #2a2d1d;          /* hairlines / bezel seams */
+    --ridge-soft:  #21241733;        /* faint grid lines */
+
+    /* ---- Signal colors ---- */
+    --signal:      #c6f24a;          /* primary signal — acid lime. THIS IS YOU. */
+    --signal-dim:  #8aa636;          /* dimmer signal for chrome */
+    --signal-deep: #57662a;          /* deepest signal, faint accents */
+    --amber:       #e8a13a;          /* STANDBY / caution state */
+    --amber-dim:   #8f6826;
+    --cyan:        #5fd3c4;          /* secondary accent — other people's handles get tints */
+
+    /* ---- Text ---- */
+    --ink:         #e9ecdd;          /* brightest readout text */
+    --ink-soft:    #b6bca6;          /* body text */
+    --ink-mute:    #7e856e;          /* labels, meta */
+    --ink-faint:   #545a47;          /* faintest legends */
+
+    /* ---- Builder handle palette (others) ---- */
+    --u1: #7fb2e8;   --u2: #d98fc4;   --u3: #e8c45f;
+    --u4: #6fd3a8;   --u5: #e89a6f;   --u6: #b59ae8;
+
+    --mono: "SFMono-Regular", "SF Mono", "JetBrains Mono", "Menlo",
+            "Consolas", "DejaVu Sans Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background:
+      radial-gradient(120% 80% at 50% -10%, #181b11 0%, var(--bg) 60%),
+      var(--bg);
+    color: var(--ink-soft);
+    font-family: var(--mono);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    min-height: 100vh;
+    padding: 28px 22px 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+  }
+
+  .stage { width: 100%; max-width: 1080px; }
+
+  /* ======================================================================
+     INSTRUMENT — the outer console body
+  ====================================================================== */
+  .instrument {
+    position: relative;
+    border: 1px solid var(--ridge);
+    border-radius: 10px;
+    background:
+      linear-gradient(180deg, #191c11 0%, var(--panel) 14%, var(--panel) 100%);
+    box-shadow:
+      0 0 0 1px #00000060,
+      0 24px 60px -28px #000000aa,
+      inset 0 1px 0 #ffffff08;
+    overflow: hidden;
+  }
+
+  /* faint engineering grid behind everything */
+  .instrument::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(var(--ridge-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--ridge-soft) 1px, transparent 1px);
+    background-size: 28px 28px;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  /* ---- Top status bar : the GATE is the hero ---- */
+  .topbar {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--ridge);
+    background: linear-gradient(180deg, #1c1f13, #15170e);
+    min-height: 62px;
+  }
+
+  .brandcell {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 18px;
+    border-right: 1px solid var(--ridge);
+  }
+  .glyph {
+    width: 26px; height: 26px;
+    border: 1px solid var(--signal-dim);
+    border-radius: 5px;
+    display: grid; place-items: center;
+    color: var(--signal);
+    position: relative;
+    background: #141609;
+  }
+  /* the "backchannel" mark: a side-door arrow into a bracket */
+  .glyph::before {
+    content: "";
+    width: 9px; height: 9px;
+    border-left: 2px solid var(--signal);
+    border-bottom: 2px solid var(--signal);
+    transform: rotate(45deg) translate(1px,-1px);
+  }
+  .brandtext { line-height: 1.15; }
+  .brandtext .name {
+    color: var(--ink);
+    font-size: 13px; font-weight: 600;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+  }
+  .brandtext .ver {
+    color: var(--ink-faint);
+    font-size: 10px; letter-spacing: 0.18em;
+  }
+
+  /* the live gate readout */
+  .gate {
+    flex: 1 1 auto;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 18px;
+    min-width: 0;
+  }
+  .gate.present {}
+  .statuslamp {
+    width: 12px; height: 12px; border-radius: 50%;
+    flex: 0 0 auto;
+    background: var(--signal);
+    box-shadow: 0 0 0 3px #c6f24a22, 0 0 14px 1px #c6f24a88;
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 3px #c6f24a22, 0 0 14px 1px #c6f24a88; }
+    50%     { box-shadow: 0 0 0 5px #c6f24a14, 0 0 18px 3px #c6f24abb; }
+  }
+  .gate .readout { min-width: 0; }
+  .gate .state {
+    color: var(--signal);
+    font-size: 14px; font-weight: 600;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    line-height: 1.2;
+  }
+  .gate .reason {
+    color: var(--ink-mute);
+    font-size: 11px; letter-spacing: 0.06em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .gate .reason b { color: var(--signal-dim); font-weight: 600; }
+
+  /* right-side telemetry: session timer + present count */
+  .telemetry {
+    display: flex; align-items: stretch;
+    border-left: 1px solid var(--ridge);
+  }
+  .tele {
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 2px;
+    padding: 0 16px;
+    border-left: 1px solid var(--ridge-soft);
+    min-width: 86px;
+  }
+  .tele:first-child { border-left: none; }
+  .tele .k {
+    color: var(--ink-faint);
+    font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+  }
+  .tele .v {
+    color: var(--ink); font-size: 15px; letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+  .tele .v .tick { color: var(--signal); }
+
+  /* ---- Body : channels rail + message console ---- */
+  .body {
+    position: relative;
+    display: flex;
+    min-height: 460px;
+  }
+
+  /* channel rail */
+  .rail {
+    flex: 0 0 220px;
+    border-right: 1px solid var(--ridge);
+    background: linear-gradient(180deg, #15170e, #131509);
+    padding: 16px 0;
+    display: flex; flex-direction: column;
+  }
+  .rail .me {
+    display: flex; align-items: center; gap: 9px;
+    padding: 0 16px 16px;
+    margin: 0 0 12px;
+    border-bottom: 1px solid var(--ridge);
+  }
+  .rail .me .av {
+    width: 28px; height: 28px; border-radius: 6px;
+    background: #1c2110;
+    border: 1px solid var(--signal-deep);
+    color: var(--signal);
+    display: grid; place-items: center;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.02em;
+  }
+  .rail .me .who { line-height: 1.2; min-width: 0; }
+  .rail .me .who .h {
+    color: var(--ink); font-size: 13px; font-weight: 600;
+  }
+  .rail .me .who .s {
+    color: var(--signal-dim); font-size: 10px; letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .rail .label {
+    color: var(--ink-faint);
+    font-size: 9px; letter-spacing: 0.26em; text-transform: uppercase;
+    padding: 0 16px 8px;
+  }
+
+  .chan {
+    display: flex; align-items: center; gap: 0;
+    padding: 9px 16px;
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    color: var(--ink-mute);
+    font-size: 13px; letter-spacing: 0.02em;
+    transition: background 140ms, color 140ms;
+  }
+  .chan .hash { color: var(--ink-faint); margin-right: 1px; }
+  .chan .nm { flex: 1 1 auto; }
+  .chan .ct {
+    color: var(--ink-faint); font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .chan:hover { color: var(--ink-soft); background: #ffffff05; }
+  .chan.active {
+    color: var(--signal);
+    border-left-color: var(--signal);
+    background: linear-gradient(90deg, #c6f24a14, transparent 80%);
+  }
+  .chan.active .hash { color: var(--signal-dim); }
+  .chan.active .ct { color: var(--signal-deep); }
+  .chan .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--cyan); margin-left: 8px; flex: 0 0 auto;
+  }
+
+  .rail .foot {
+    margin-top: auto;
+    padding: 14px 16px 0;
+    border-top: 1px solid var(--ridge-soft);
+    color: var(--ink-faint);
+    font-size: 10px; letter-spacing: 0.08em; line-height: 1.6;
+  }
+  .rail .foot .on { color: var(--signal-dim); }
+
+  /* console / message pane */
+  .console {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; flex-direction: column;
+    background: var(--inset);
+  }
+
+  /* channel header strip */
+  .chanhdr {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--ridge);
+    background: #14160d;
+  }
+  .chanhdr .title {
+    color: var(--ink); font-size: 14px; font-weight: 600; letter-spacing: 0.02em;
+  }
+  .chanhdr .title .hash { color: var(--signal-dim); }
+  .chanhdr .topic {
+    color: var(--ink-mute); font-size: 11px; letter-spacing: 0.02em;
+    border-left: 1px solid var(--ridge); padding-left: 12px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chanhdr .live {
+    margin-left: auto; flex: 0 0 auto;
+    display: flex; align-items: center; gap: 7px;
+    color: var(--signal); font-size: 10px; letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .chanhdr .live .b {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--signal); box-shadow: 0 0 8px #c6f24a;
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+
+  /* log */
+  .log {
+    flex: 1 1 auto; min-height: 0;
+    overflow-y: auto;
+    padding: 14px 0 8px;
+    scrollbar-width: thin;
+    scrollbar-color: #3a3e29 transparent;
+  }
+  .log::-webkit-scrollbar { width: 9px; }
+  .log::-webkit-scrollbar-thumb { background: #2f3322; border-radius: 9px; }
+
+  /* a system separator (history catch-up marker) */
+  .sep {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 18px 12px;
+    color: var(--ink-faint);
+    font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+  }
+  .sep::before, .sep::after {
+    content: ""; height: 1px; background: var(--ridge); flex: 1 1 auto;
+  }
+
+  /* a message row */
+  .row {
+    display: grid;
+    grid-template-columns: 64px 150px 1fr;
+    gap: 0 14px;
+    padding: 4px 18px;
+    align-items: baseline;
+  }
+  .row:hover { background: #ffffff04; }
+  .row .ts {
+    color: var(--ink-faint); font-size: 11px;
+    font-variant-numeric: tabular-nums; text-align: right;
+    padding-top: 1px; user-select: none;
+  }
+  .row .name {
+    font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row .txt {
+    color: var(--ink-soft); font-size: 13.5px; line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+  .row .txt code {
+    color: var(--cyan); background: #0a0c06;
+    border: 1px solid #20241655; border-radius: 4px;
+    padding: 0.5px 5px; font-size: 12.5px;
+  }
+  .row .txt .mention { color: var(--signal); }
+
+  /* self message gets a signal gutter */
+  .row.self {
+    background: linear-gradient(90deg, #c6f24a0d, transparent 60%);
+    border-left: 2px solid var(--signal);
+    padding-left: 16px;
+  }
+  .row.self .name { color: var(--signal); }
+  .row.self .txt { color: var(--ink); }
+
+  /* handle colors */
+  .u-me  { color: var(--signal); }
+  .u-1 { color: var(--u1); } .u-2 { color: var(--u2); } .u-3 { color: var(--u3); }
+  .u-4 { color: var(--u4); } .u-5 { color: var(--u5); } .u-6 { color: var(--u6); }
+
+  /* input dock */
+  .dock {
+    border-top: 1px solid var(--ridge);
+    background: #14160d;
+    padding: 12px 14px;
+  }
+  .inputline {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--inset);
+    border: 1px solid var(--ridge);
+    border-radius: 7px;
+    padding: 9px 12px;
+  }
+  .inputline:focus-within { border-color: var(--signal-deep); }
+  .inputline .gt {
+    color: var(--signal); font-weight: 700; flex: 0 0 auto;
+    user-select: none;
+  }
+  .inputline .ph {
+    flex: 1 1 auto; color: var(--ink-soft); font-size: 13.5px;
+    white-space: nowrap; overflow: hidden;
+  }
+  .inputline .caret {
+    display: inline-block; width: 8px; height: 16px;
+    background: var(--signal); vertical-align: -3px;
+    animation: blink 1.05s steps(1) infinite;
+  }
+  @keyframes blink { 0%,50% { opacity: 1; } 50.01%,100% { opacity: 0; } }
+  .inputline .send {
+    flex: 0 0 auto;
+    color: var(--ink-faint); font-size: 10px; letter-spacing: 0.16em;
+    text-transform: uppercase; user-select: none;
+  }
+  .inputline .send b { color: var(--signal-dim); }
+
+  .dockmeta {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 4px 0;
+    color: var(--ink-faint); font-size: 10px; letter-spacing: 0.08em;
+  }
+  .dockmeta .live-tag {
+    color: var(--signal-dim);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .dockmeta .live-tag .b {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--signal);
+    box-shadow: 0 0 6px #c6f24a;
+  }
+  .dockmeta .sx { color: var(--ridge); }
+
+  /* ======================================================================
+     STANDBY PANEL — the "not building" gate state, smaller, stacked below
+  ====================================================================== */
+  .standby {
+    position: relative;
+    border: 1px solid var(--ridge);
+    border-radius: 10px;
+    background:
+      linear-gradient(180deg, #19170f 0%, #16140d 100%);
+    overflow: hidden;
+    padding: 0;
+  }
+  .standby::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      repeating-linear-gradient(45deg, #e8a13a08 0 12px, transparent 12px 24px);
+    pointer-events: none;
+  }
+  .standby .sb-top {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--ridge);
+    background: linear-gradient(180deg, #211c10, #1a160d);
+    position: relative;
+  }
+  .standby .sb-lamp {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 0 3px #e8a13a22, 0 0 12px 1px #e8a13a66;
+    animation: breathe 3.4s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+  .standby .sb-state {
+    color: var(--amber); font-size: 14px; font-weight: 600;
+    letter-spacing: 0.3em; text-transform: uppercase;
+  }
+  .standby .sb-sub {
+    color: var(--ink-mute); font-size: 11px; letter-spacing: 0.04em;
+  }
+  .standby .sb-brand {
+    margin-left: auto;
+    color: var(--ink-faint); font-size: 10px; letter-spacing: 0.24em;
+    text-transform: uppercase;
+  }
+  .standby .sb-body {
+    position: relative;
+    padding: 26px 22px 28px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .standby .sb-headline {
+    color: var(--ink); font-size: 15px; letter-spacing: 0.02em;
+    line-height: 1.5; max-width: 56ch;
+  }
+  .standby .sb-headline b { color: var(--amber); font-weight: 600; }
+  .standby .sb-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--ridge); border: 1px solid var(--ridge);
+    border-radius: 7px; overflow: hidden;
+    max-width: 560px;
+  }
+  .standby .sb-cell {
+    background: #14130c; padding: 12px 14px;
+  }
+  .standby .sb-cell .k {
+    color: var(--ink-faint); font-size: 9px; letter-spacing: 0.2em;
+    text-transform: uppercase; margin-bottom: 5px;
+  }
+  .standby .sb-cell .v {
+    color: var(--ink-soft); font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  .standby .sb-cell .v.off { color: var(--amber-dim); }
+  .standby .sb-hint {
+    color: var(--ink-faint); font-size: 11px; letter-spacing: 0.04em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .standby .sb-hint code {
+    color: var(--signal-dim); background: #0c0d08;
+    border: 1px solid #20241655; border-radius: 4px;
+    padding: 1px 7px; font-size: 11px; letter-spacing: 0;
+  }
+
+  /* small caption under each panel */
+  .caption {
+    text-align: center;
+    color: var(--ink-faint);
+    font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+    margin: 12px 0 0;
+  }
+
+  @media (max-width: 720px) {
+    .telemetry { display: none; }
+    .rail { flex-basis: 168px; }
+    .row { grid-template-columns: 52px 110px 1fr; gap: 0 10px; }
+    .standby .sb-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- ============================================================
+       PRESENT (building) — the live console
+  ============================================================ -->
+  <div class="stage">
+    <div class="instrument">
+
+      <!-- TOP STATUS BAR : the gate as hero -->
+      <div class="topbar">
+        <div class="brandcell">
+          <div class="glyph" aria-hidden="true"></div>
+          <div class="brandtext">
+            <div class="name">backchannel</div>
+            <div class="ver">console / v1</div>
+          </div>
+        </div>
+
+        <div class="gate present">
+          <div class="statuslamp" aria-hidden="true"></div>
+          <div class="readout">
+            <div class="state">present</div>
+            <div class="reason">the door is open because <b>your agent is working</b></div>
+          </div>
+        </div>
+
+        <div class="telemetry">
+          <div class="tele">
+            <div class="k">session</div>
+            <div class="v"><span class="tick">04</span>:17</div>
+          </div>
+          <div class="tele">
+            <div class="k">building now</div>
+            <div class="v">23</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BODY : rail + console -->
+      <div class="body">
+
+        <!-- channel rail -->
+        <nav class="rail">
+          <div class="me">
+            <div class="av">DV</div>
+            <div class="who">
+              <div class="h">@devsmitt</div>
+              <div class="s">present</div>
+            </div>
+          </div>
+
+          <div class="label">channels</div>
+          <div class="chan active">
+            <span class="hash">#</span><span class="nm">general</span>
+            <span class="ct">128</span>
+          </div>
+          <div class="chan">
+            <span class="hash">#</span><span class="nm">help</span>
+            <span class="ct">41</span><span class="dot" aria-hidden="true"></span>
+          </div>
+          <div class="chan">
+            <span class="hash">#</span><span class="nm">what-are-you-building</span>
+            <span class="ct">67</span>
+          </div>
+
+          <div class="foot">
+            present: <span class="on">23 building</span><br>
+            you exit when your agent stops.
+          </div>
+        </nav>
+
+        <!-- console / messages -->
+        <section class="console">
+
+          <div class="chanhdr">
+            <div class="title"><span class="hash">#</span>general</div>
+            <div class="topic">shop talk for whoever's mid-build right now</div>
+            <div class="live"><span class="b" aria-hidden="true"></span>live</div>
+          </div>
+
+          <div class="log">
+
+            <div class="sep">caught up · 9 earlier today</div>
+
+            <div class="row">
+              <div class="ts">09:41</div>
+              <div class="name u-1">@marisol</div>
+              <div class="txt">finally killed the flaky test that's been red for two weeks. it was a timezone thing the whole time, of course it was a timezone thing</div>
+            </div>
+
+            <div class="row">
+              <div class="ts">09:42</div>
+              <div class="name u-2">@theo_b</div>
+              <div class="txt">it is ALWAYS a timezone thing. congrats on the green board</div>
+            </div>
+
+            <div class="row">
+              <div class="ts">09:44</div>
+              <div class="name u-3">@kwabena</div>
+              <div class="txt">shipping the stripe webhook handler today. anyone got a clean pattern for idempotency keys that isn't just a giant <code>seen_events</code> table?</div>
+            </div>
+
+            <div class="row self">
+              <div class="ts">09:45</div>
+              <div class="name u-me">@devsmitt</div>
+              <div class="txt"><span class="mention">@kwabena</span> i hash the event id + type into a unique column and let the db reject dupes on insert. cheap and the constraint does the work for you</div>
+            </div>
+
+            <div class="row">
+              <div class="ts">09:46</div>
+              <div class="name u-3">@kwabena</div>
+              <div class="txt">oh that's clean. letting the constraint be the lock. stealing it</div>
+            </div>
+
+            <div class="row">
+              <div class="ts">09:48</div>
+              <div class="name u-4">@priyanka</div>
+              <div class="txt">migrating us off heroku this afternoon. the agent is grinding through the dockerfile right now and i am just sitting here watching the logs scroll, hence: here</div>
+            </div>
+
+            <div class="row">
+              <div class="ts">09:49</div>
+              <div class="name u-5">@dom</div>
+              <div class="txt">that's the whole gimmick isn't it. i'm only ever in this room because something's compiling</div>
+            </div>
+
+            <div class="row">
+              <div class="ts">09:50</div>
+              <div class="name u-6">@willa</div>
+              <div class="txt">just pushed v2 of the search ranking. p95 latency down from 380ms to 90ms after i moved the embedding lookup out of the hot path. very pleased with myself</div>
+            </div>
+
+            <div class="row self">
+              <div class="ts">09:51</div>
+              <div class="name u-me">@devsmitt</div>
+              <div class="txt">90ms is a real number, nice. what'd you cache it in?</div>
+            </div>
+
+            <div class="row">
+              <div class="ts">09:52</div>
+              <div class="name u-6">@willa</div>
+              <div class="txt">redis with a 10 min ttl. rebuild's fully async so a cold key never blocks a request. agent wrote most of the warming job actually</div>
+            </div>
+
+          </div>
+
+          <!-- input dock -->
+          <div class="dock">
+            <div class="inputline">
+              <span class="gt">@devsmitt &rsaquo;</span>
+              <span class="ph">ttl sounds right. ship it<span class="caret" aria-hidden="true"></span></span>
+              <span class="send">enter to <b>send</b></span>
+            </div>
+            <div class="dockmeta">
+              <span class="live-tag"><span class="b" aria-hidden="true"></span>posting as @devsmitt</span>
+              <span class="sx">·</span>
+              <span>you can write here only while your agent is working</span>
+            </div>
+          </div>
+
+        </section>
+      </div>
+    </div>
+    <div class="caption">state 03 — present · building</div>
+  </div>
+
+  <!-- ============================================================
+       STANDBY (not building) — the gate, closed
+  ============================================================ -->
+  <div class="stage">
+    <div class="standby">
+      <div class="sb-top">
+        <div class="sb-lamp" aria-hidden="true"></div>
+        <div>
+          <div class="sb-state">standby</div>
+        </div>
+        <div class="sb-sub">channel closed — no agent activity detected</div>
+        <div class="sb-brand">backchannel · @devsmitt</div>
+      </div>
+
+      <div class="sb-body">
+        <div class="sb-headline">
+          you're signed in, but the room is dark. backchannel opens the moment your
+          agent starts working — and closes when it stops. <b>start a build to step back in.</b>
+        </div>
+
+        <div class="sb-grid">
+          <div class="sb-cell">
+            <div class="k">presence</div>
+            <div class="v off">offline · not building</div>
+          </div>
+          <div class="sb-cell">
+            <div class="k">last seen</div>
+            <div class="v">11m ago · #general</div>
+          </div>
+          <div class="sb-cell">
+            <div class="k">waiting for</div>
+            <div class="v">agent · prompt submit</div>
+          </div>
+        </div>
+
+        <div class="sb-hint">
+          tip: fire a prompt at your coding tool and you'll fade back in. no button to press here — <code>building == present</code>
+        </div>
+      </div>
+    </div>
+    <div class="caption">state 02 — standby · not building</div>
+  </div>
+
+</body>
+</html>

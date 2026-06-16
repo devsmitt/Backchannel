@@ -7,27 +7,56 @@
 <title>backchannel</title>
 <style>
   /*
-    BACKCHANNEL — single-file terminal client.
+    BACKCHANNEL — "ON AIR" identity.
+    --------------------------------------------------------------
+    Backchannel is a shortwave side-band you transmit on, but ONLY while your
+    agent is building. The transmitter is live solely during real work — that
+    is the gate, made into a flex. The whole device only makes sense lit.
+
     Three states, driven by token presence + server {presence} pushes:
       SIGNED-OUT (.signedout) -> paste-your-token sign-in.
-      NOT BUILDING (.idle)    -> dark "you're not building" hush. Socket stays open.
-      PRESENT (.present)      -> rooms revealed: channel switcher, scrollable log, input.
+      NOT BUILDING (.idle)    -> "transmitter cold" — the band is off air. Socket stays open.
+      PRESENT (.present)      -> rooms revealed: bands, the transmission log, transmit row.
+
     The token is a SECRET — taken once via paste, kept in localStorage, NEVER in a URL.
-    Aesthetic carried from The Void: dark, monospace, low-res, phosphor-green + soft-gray.
+
+    COLOR DISCIPLINE: red (--on-air) appears ONLY in the live ON-AIR / TX state.
+    It is forbidden anywhere the transmitter is cold (signed-out, idle). The gate
+    is legible by color alone. Amber = your call-sign / tuning. Green = carrier locked.
   */
 
   :root {
-    --bg:        #000000;            /* pure black */
-    --room-bg:   #050605;            /* near-black when present */
-    --phosphor:  #7dffb0;           /* phosphor-green — this is YOU */
-    --phosphor-dim: #3a6e51;        /* dimmer green for chrome */
-    --other:     #cbd2cd;           /* soft light-gray — every other builder */
-    --other-dim: #99a39c;           /* dimmer gray for their handles */
-    --text:      #cbd2cd;           /* default body text */
-    --text-dim:  #5d6a63;           /* faint hush */
-    --self-dim:  #4f8e6a;
-    --line:      rgba(125,255,176,0.12);
-    --fade-ms:   1100ms;
+    /* Warm equipment palette — graphite chassis, not pure black. */
+    --chassis:       #1a1714;
+    --chassis-2:     #211d19;
+    --panel:         #15120f;
+    --panel-edge:    #2d2823;
+    --bezel:         #0f0d0b;
+
+    /* Type */
+    --ink:           #ece4d6;
+    --ink-dim:       #b8ad9b;
+    --ink-faint:     #7c7367;
+    --ink-ghost:     #574f46;
+
+    /* Signal accents */
+    --on-air:        #ff5436;   /* hot transmit red — RESERVED for live TX only */
+    --on-air-soft:   #c4452f;
+    --amber:         #ffb238;   /* dial glow, tuning, YOUR call-sign */
+    --amber-soft:    #c98a2a;
+    --signal:        #5fd6a0;   /* signal-good green — carrier locked */
+    --signal-dim:    #3f8e6e;
+    --cyan:          #6fc5d6;
+    --rose:          #e9879a;
+    --violet:        #b29ae0;
+
+    --seam:          rgba(236,228,214,0.07);
+    --seam-strong:   rgba(236,228,214,0.13);
+
+    --mono: "SFMono-Regular", "SF Mono", "JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+    --fade-ms: 900ms;
   }
 
   * { box-sizing: border-box; }
@@ -35,39 +64,31 @@
   html, body {
     margin: 0;
     height: 100%;
-    background: var(--bg);
     overflow: hidden;
+    background:
+      radial-gradient(120% 80% at 50% -10%, #221d18 0%, #141110 60%, #0e0c0a 100%);
+    color: var(--ink);
   }
 
   body {
-    font-family: "SFMono-Regular", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    font-family: var(--sans);
     font-size: 15px;
-    line-height: 1.45;
-    color: var(--text);
-    -webkit-font-smoothing: none;        /* lean into low-res */
-    text-rendering: optimizeSpeed;
+    line-height: 1.5;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     -webkit-tap-highlight-color: transparent;
   }
 
   /* ---- Shell ----------------------------------------------------------- */
-
   #shell {
     position: fixed;
     inset: 0;
     display: flex;
     flex-direction: column;
-    background: var(--bg);
-    transition: background var(--fade-ms) ease;
-  }
-  body.present #shell {
-    background:
-      radial-gradient(ellipse 46% 38% at 50% 44%, rgba(150,255,205,0.06), transparent 62%),
-      var(--room-bg);
-  }
-  body:not(.present) #shell {
-    background:
-      radial-gradient(ellipse 42% 34% at 50% 46%, rgba(150,255,205,0.04), transparent 62%),
-      var(--bg);
+    align-items: center;
+    justify-content: center;
+    padding: 28px 22px;
   }
 
   /* generic centred overlay used by signed-out + idle states */
@@ -78,276 +99,472 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    text-align: center;
-    padding: 1.5em;
+    padding: 28px 22px;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 700ms ease;
+    transition: opacity 600ms ease;
     z-index: 4;
   }
   body.signedout #signin { opacity: 1; pointer-events: auto; }
   body.idle      #idle    { opacity: 1; pointer-events: auto; }
 
-  /* ---- Sign-in (SIGNED-OUT) ------------------------------------------- */
-
-  #signin .brand {
-    color: var(--phosphor);
-    opacity: 0.85;
-    letter-spacing: 0.34em;
-    font-size: 13px;
-    margin-bottom: 1.6em;
-    text-shadow: 0 0 12px rgba(125,255,176,0.25);
+  /* ============================================================ DEVICE FRAME */
+  /* Shared faceplate used across present + idle + sign-in panels. */
+  .face {
+    display: flex;
+    align-items: stretch;
+    gap: 18px;
+    padding: 16px 20px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.035), rgba(0,0,0,0) 40%),
+      var(--chassis-2);
+    border-bottom: 1px solid var(--panel-edge);
   }
-  #signin .ask {
-    color: var(--text-dim);
-    letter-spacing: 0.1em;
-    font-size: 13px;
-    margin-bottom: 1.1em;
-    max-width: 40ch;
-  }
-  .tokenbox {
+  .brandblock { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; }
+  .wordmark {
+    font-family: var(--mono);
+    font-size: 15px;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: var(--ink);
     display: flex;
     align-items: center;
-    gap: 0.6em;
-    max-width: 92vw;
-    width: 420px;
-    border: 1px solid var(--line);
-    background: rgba(125,255,176,0.03);
-    padding: 0.55em 0.7em;
+    gap: 9px;
   }
-  .tokenbox::before {
-    content: "\203a";
-    color: var(--phosphor);
-    opacity: 0.6;
-    flex: 0 0 auto;
+  .wordmark .bars {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 13px;
   }
-  #tokenInput {
+  .wordmark .bars i {
+    width: 2px;
+    background: var(--amber);
+    border-radius: 1px;
+    display: block;
+  }
+  .wordmark .bars i:nth-child(1){ height: 4px;  opacity: .55; }
+  .wordmark .bars i:nth-child(2){ height: 7px;  opacity: .7; }
+  .wordmark .bars i:nth-child(3){ height: 10px; opacity: .85; }
+  .wordmark .bars i:nth-child(4){ height: 13px; }
+  .tagline {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.2em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+  }
+
+  /* slim, quiet band indicator (Console-restraint: no needle, no dense ticks) */
+  .dial {
     flex: 1 1 auto;
+    align-self: center;
+    height: 30px;
+    position: relative;
+    border-radius: 6px;
+    background: linear-gradient(180deg, #100d0b, #18130f);
+    border: 1px solid #2a241f;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.6);
+    overflow: hidden;
     min-width: 0;
-    background: transparent;
-    border: none;
-    outline: none;
-    color: var(--phosphor);
-    caret-color: var(--phosphor);
-    font: inherit;
-    opacity: 0.95;
   }
-  #tokenInput::placeholder { color: var(--phosphor-dim); opacity: 0.7; }
-  #signinBtn {
-    flex: 0 0 auto;
-    background: none;
-    border: 1px solid rgba(125,255,176,0.25);
-    color: var(--phosphor);
-    font: inherit;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    padding: 0.3em 0.7em;
-    cursor: pointer;
-    opacity: 0.82;
-    transition: opacity 250ms ease, background 250ms ease;
+  .dial .ticks {
+    position: absolute; left: 0; right: 0;
+    top: 6px; height: 9px;
+    background-image:
+      repeating-linear-gradient(90deg, var(--ink-ghost) 0 1px, transparent 1px 22px);
+    opacity: 0.5;
   }
-  #signinBtn:hover { opacity: 1; background: rgba(125,255,176,0.09); }
-  #signin .hint {
-    margin-top: 1.4em;
-    color: var(--text-dim);
-    opacity: 0.6;
-    font-size: 12px;
+  .dial .scale {
+    position: absolute;
+    bottom: 4px; left: 12px; right: 12px;
+    display: flex; justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 9px;
     letter-spacing: 0.08em;
-    max-width: 44ch;
-    line-height: 1.7;
+    color: var(--ink-faint);
   }
-  #signin .hint code {
-    color: var(--phosphor-dim);
-    background: rgba(125,255,176,0.05);
-    padding: 0.05em 0.4em;
-  }
-  #signinErr {
-    margin-top: 1.1em;
-    color: #d98a8a;
-    opacity: 0;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    transition: opacity 300ms ease;
-    min-height: 1em;
-  }
-  body.signin-error #signinErr { opacity: 0.85; }
-
-  /* ---- NOT BUILDING (idle) -------------------------------------------- */
-
-  #idle .pulse {
-    color: var(--phosphor-dim);
+  .dial .freq {
+    position: absolute;
+    top: 4px; left: 12px;
+    font-family: var(--mono);
+    font-size: 10px;
     letter-spacing: 0.12em;
-    animation: breathe 4.5s ease-in-out infinite;
-  }
-  #idle .sub {
-    color: var(--text-dim);
-    opacity: 0.6;
-    font-size: 13px;
-    letter-spacing: 0.16em;
-    margin-top: 0.9em;
-    max-width: 40ch;
-  }
-  #idle .who {
-    color: var(--self-dim);
-    opacity: 0.7;
-    font-size: 11px;
-    letter-spacing: 0.22em;
-    margin-top: 2.2em;
-  }
-  @keyframes breathe {
-    0%, 100% { opacity: 0.28; }
-    50%      { opacity: 0.72; }
+    color: var(--amber);
   }
 
-  /* ---- PRESENT: rooms view -------------------------------------------- */
-
-  #rooms {
-    flex: 1;
+  /* ON-AIR lamp — the hero. Lit (present) only. */
+  .lamp {
+    flex: 0 0 auto;
+    align-self: center;
     display: flex;
-    min-height: 0;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 13px 7px 11px;
+    border-radius: 7px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.26em;
+    font-weight: 500;
+    text-transform: uppercase;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .lamp .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  .lamp.on {
+    color: #ffd9cf;
+    background: linear-gradient(180deg, rgba(255,84,54,0.22), rgba(255,84,54,0.08));
+    border: 1px solid rgba(255,84,54,0.5);
+    box-shadow: 0 0 18px -2px rgba(255,84,54,0.45), inset 0 0 10px rgba(255,84,54,0.12);
+  }
+  .lamp.on .dot {
+    background: var(--on-air);
+    box-shadow: 0 0 10px 2px rgba(255,84,54,0.85), 0 0 2px #fff inset;
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; box-shadow: 0 0 10px 2px rgba(255,84,54,0.85); }
+    50%     { opacity: 0.78; box-shadow: 0 0 16px 4px rgba(255,84,54,0.95); }
+  }
+  .lamp.off {
+    color: var(--ink-ghost);
+    background: rgba(0,0,0,0.25);
+    border: 1px solid #2a241f;
+  }
+  .lamp.off .dot { background: #3a322b; box-shadow: inset 0 0 3px rgba(0,0,0,0.8); }
+
+  /* ============================================================ PRESENT: rooms */
+  #rig {
+    width: 100%;
+    max-width: 940px;
+    height: 100%;
+    max-height: 720px;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(180deg, #221e1a 0%, var(--chassis) 14%, var(--chassis) 100%);
+    border: 1px solid #322b25;
+    border-radius: 14px;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 40px 90px -40px rgba(0,0,0,0.8),
+      0 0 0 1px rgba(0,0,0,0.4);
+    overflow: hidden;
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--fade-ms) ease;
     z-index: 2;
   }
-  body.present #rooms { opacity: 1; pointer-events: auto; }
+  body.present #rig { opacity: 1; pointer-events: auto; }
 
-  /* left channel switcher */
-  #channels {
+  /* Status strip under the faceplate */
+  .strip {
     flex: 0 0 auto;
-    width: 200px;
-    max-width: 38vw;
-    border-right: 1px solid var(--line);
-    padding: 2.4vh 0 2vh;
+    display: flex;
+    align-items: center;
+    background: var(--bezel);
+    border-bottom: 1px solid var(--panel-edge);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+  }
+  .strip .seg {
+    padding: 7px 16px;
+    display: flex; align-items: center; gap: 8px;
+    border-right: 1px solid rgba(255,255,255,0.04);
+    white-space: nowrap;
+  }
+  .strip .seg .val { color: var(--ink-dim); }
+  .strip .callsign .val { color: var(--amber); letter-spacing: 0.16em; }
+  .strip .meter { display: inline-flex; gap: 2px; align-items: flex-end; }
+  .strip .meter i { width: 3px; background: var(--signal); border-radius: 1px; display: block; }
+  .strip .meter i:nth-child(1){ height: 4px; }
+  .strip .meter i:nth-child(2){ height: 7px; }
+  .strip .meter i:nth-child(3){ height: 10px; }
+  .strip .meter i:nth-child(4){ height: 13px; }
+  .strip .spacer { flex: 1 1 auto; border-right: none; }
+  .strip .live { color: var(--signal); }
+  .strip .live .pip {
+    display:inline-block; width:6px; height:6px; border-radius:50%;
+    background: var(--signal); box-shadow: 0 0 6px var(--signal); margin-right:4px;
+  }
+  /* reconnecting takes over the right segment when the carrier drops */
+  #conn {
+    display: none;
+    align-items: center; gap: 8px;
+    color: var(--amber);
+  }
+  #conn .pip {
+    display:inline-block; width:6px; height:6px; border-radius:50%;
+    background: var(--amber); box-shadow: 0 0 6px var(--amber); margin-right:2px;
+    animation: pulse-amber 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse-amber { 0%,100%{opacity:1} 50%{opacity:.35} }
+  body.reconnecting #conn  { display: flex; }
+  body.reconnecting #liveseg { display: none; }
+
+  /* ============================================================ ROOM BODY */
+  #rooms {
+    flex: 1 1 auto;
+    display: flex;
+    min-height: 0;
+  }
+
+  /* --- Band selector + roster (channel switcher) --- */
+  #channels {
+    flex: 0 0 226px;
+    max-width: 42vw;
+    background: linear-gradient(180deg, #18140f, #141110);
+    border-right: 1px solid var(--panel-edge);
+    padding: 16px 0 14px;
     display: flex;
     flex-direction: column;
-    gap: 0.15em;
     overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #2c2620 transparent;
   }
-  #channels .me {
-    color: var(--phosphor);
-    opacity: 0.8;
+  .bands-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.24em;
+    color: var(--ink-ghost);
+    text-transform: uppercase;
+    padding: 0 18px 10px;
+  }
+  .me {
+    font-family: var(--mono);
     font-size: 11px;
     letter-spacing: 0.16em;
-    padding: 0 1.2em 1.4em;
+    color: var(--amber);
+    padding: 0 18px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  #channels .me::before { content: "\25CF "; opacity: 0.7; }
+  .me .live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--amber); box-shadow: 0 0 6px var(--amber);
+    flex: 0 0 auto;
+  }
   .chan {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
     background: none;
     border: none;
     border-left: 2px solid transparent;
-    font: inherit;
-    text-align: left;
-    color: var(--other-dim);
-    opacity: 0.7;
-    padding: 0.35em 1.2em;
+    padding: 11px 18px;
     cursor: pointer;
+    text-align: left;
+    font: inherit;
+    transition: background 180ms ease;
+  }
+  .chan .freqno {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-ghost);
+    flex: 0 0 auto;
+    width: 40px;
     letter-spacing: 0.04em;
-    transition: opacity 200ms ease, color 200ms ease, background 200ms ease;
+  }
+  .chan .name {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    color: var(--ink-dim);
+    letter-spacing: 0.02em;
+    flex: 1 1 auto;
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .chan:hover { opacity: 0.95; }
+  .chan:hover { background: rgba(255,255,255,0.02); }
   .chan.active {
-    color: var(--phosphor);
-    opacity: 0.95;
-    border-left-color: var(--phosphor);
-    background: rgba(125,255,176,0.05);
+    background: linear-gradient(90deg, rgba(255,178,56,0.10), rgba(255,178,56,0.01));
+    border-left-color: var(--amber);
+  }
+  .chan.active .name { color: var(--amber); }
+  .chan.active .freqno { color: var(--amber-soft); }
+
+  .chan-divider { height: 1px; background: var(--seam); margin: 12px 18px; }
+
+  .footnote {
+    margin-top: auto;
+    padding: 14px 18px 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 1.6;
+    letter-spacing: 0.02em;
+    color: var(--ink-ghost);
   }
 
-  /* right side: log + input */
+  /* --- The transmission log (message well) --- */
   #main {
     flex: 1 1 auto;
     min-width: 0;
     display: flex;
     flex-direction: column;
     min-height: 0;
-    padding: 2.4vh 0 2vh;
+    background:
+      linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0) 6%),
+      var(--panel);
     position: relative;
   }
-  #conn {
-    position: absolute;
-    top: 1vh;
-    left: 0;
-    right: 0;
-    text-align: center;
-    font-size: 11px;
-    letter-spacing: 0.3em;
-    color: var(--self-dim);
-    opacity: 0;
-    transition: opacity 500ms ease;
-    pointer-events: none;
-    z-index: 5;
+  .wellhead {
+    flex: 0 0 auto;
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 13px 22px 11px;
+    border-bottom: 1px solid var(--seam);
   }
-  body.reconnecting #conn { opacity: 0.6; }
+  .wellhead .ch {
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+  }
+  .wellhead .topic {
+    font-size: 12.5px;
+    color: var(--ink-faint);
+  }
 
   #log {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 0 1.6em 1.1em;
+    padding: 16px 22px 10px;
     display: flex;
     flex-direction: column;
-    gap: 0.22em;
+    gap: 14px;
     scrollbar-width: thin;
-    scrollbar-color: var(--phosphor-dim) transparent;
+    scrollbar-color: #2c2620 transparent;
   }
   /* Spacer eats free space so few messages rest at the bottom, but collapses
      on overflow so the top stays scrollable. (NOT justify-content:flex-end —
      that clips the overflow unreachably.) */
   #logspacer { flex: 1 1 auto; min-height: 0; }
-  #log::-webkit-scrollbar { width: 8px; }
-  #log::-webkit-scrollbar-thumb { background: rgba(203,210,205,0.14); }
+  #log::-webkit-scrollbar { width: 9px; }
+  #log::-webkit-scrollbar-thumb { background: #2c2620; border-radius: 4px; }
 
+  /* a relayed transmission — gridded ts / handle / body (Console discipline) */
   .msg {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    animation: lineIn 420ms ease both;
+  }
+  @keyframes lineIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+  .msg .handle {
+    flex: 0 0 auto;
+    width: 142px;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--cyan);
+  }
+  .msg .body {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--sans);
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    padding-left: 14px;
+    border-left: 1px solid var(--seam);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    animation: lineIn 500ms ease both;
   }
-  @keyframes lineIn { from { opacity: 0; } to { opacity: 1; } }
-  .msg .handle { color: var(--other-dim); opacity: 0.95; }
-  .msg .body   { color: var(--other);     opacity: 0.85; }
-  .msg.self .handle { color: var(--phosphor); opacity: 0.9; }
-  .msg.self .body   { color: var(--phosphor); opacity: 0.82; }
+  /* stable call-sign tint per station, hashed from the handle */
+  .msg.s-amber  .handle { color: var(--amber); }
+  .msg.s-cyan   .handle { color: var(--cyan); }
+  .msg.s-signal .handle { color: var(--signal); }
+  .msg.s-rose   .handle { color: var(--rose); }
+  .msg.s-violet .handle { color: var(--violet); }
+
+  /* YOUR own transmissions — broadcasting station */
+  .msg.self .handle { color: var(--amber); font-weight: 500; }
+  .msg.self .body {
+    border-left-color: rgba(255,178,56,0.5);
+    color: #fbeed7;
+  }
 
   #emptyhint {
     position: absolute;
-    top: 50%;
-    left: 200px;
+    top: 52%;
+    left: 226px;
     right: 0;
     transform: translateY(-50%);
     text-align: center;
-    color: var(--text-dim);
-    opacity: 0.4;
-    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
     pointer-events: none;
     z-index: 3;
-    animation: breathe 5s ease-in-out infinite;
-    padding: 0 1em;
+    padding: 0 2em;
+    line-height: 1.7;
   }
 
-  /* input row */
+  /* --- Compose / transmit row --- */
   #inputrow {
     flex: 0 0 auto;
+    border-top: 1px solid var(--panel-edge);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.2));
+    padding: 14px 18px;
     display: flex;
     align-items: center;
-    gap: 0.5em;
-    padding: 0.2em 1.6em 0;
+    gap: 14px;
   }
-  #prompt {
-    color: var(--phosphor);
-    opacity: 0.85;
-    user-select: none;
+  .mic {
     flex: 0 0 auto;
-    letter-spacing: 0.03em;
-    white-space: nowrap;
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--on-air);
+    user-select: none;
+  }
+  .mic .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--on-air);
+    box-shadow: 0 0 8px var(--on-air);
   }
   #field {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bezel);
+    border: 1px solid #2c2620;
+    border-radius: 8px;
+    padding: 11px 14px;
+    box-shadow: inset 0 1px 4px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+  #prompt {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--amber);
+    flex: 0 0 auto;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    user-select: none;
+  }
+  /* mirror + caret render the live typed text over the transparent real input */
+  #typedwrap {
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
@@ -357,21 +574,25 @@
     white-space: pre;
   }
   #mirror {
-    color: var(--phosphor);
-    opacity: 0.9;
+    font-family: var(--sans);
+    font-size: 14.5px;
+    color: var(--ink);
     white-space: pre;
     flex: 0 0 auto;
   }
+  #mirror:empty::before {
+    content: "message the band…";
+    color: var(--ink-ghost);
+  }
   #cursor {
     flex: 0 0 auto;
-    width: 0.55em;
-    height: 1.05em;
-    background: var(--phosphor);
-    opacity: 0.85;
-    margin-left: 1px;
-    animation: blink 1.05s steps(1) infinite;
+    width: 2px;
+    height: 17px;
+    background: var(--amber);
+    margin-left: 2px;
+    animation: blink 1.1s steps(1) infinite;
   }
-  @keyframes blink { 0%, 50% { opacity: 0.85; } 50.01%, 100% { opacity: 0; } }
+  @keyframes blink { 0%,50%{opacity:1} 50.01%,100%{opacity:0} }
   #say {
     position: absolute;
     inset: 0;
@@ -385,105 +606,336 @@
     padding: 0;
     margin: 0;
   }
+  #sendBtn {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--chassis);
+    background: var(--amber);
+    border: none;
+    border-radius: 7px;
+    padding: 11px 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 150ms ease;
+  }
+  #sendBtn:hover { filter: brightness(1.08); }
   body:not(.present) #cursor { display: none; }
 
-  /* ---- CRT flavor: scanlines + vignette (present only) ---------------- */
-  #crt {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 50;
+  /* ============================================================ SIGN-IN + IDLE PANELS */
+  /* shared standalone device card for the off-air / signed-out screens */
+  .panel {
+    width: 100%;
+    max-width: 560px;
+    background: linear-gradient(180deg, #221e1a 0%, var(--chassis) 14%, var(--chassis) 100%);
+    border: 1px solid #322b25;
+    border-radius: 14px;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 30px 70px -40px rgba(0,0,0,0.8);
+    overflow: hidden;
+    text-align: left;
   }
-  #crt::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: repeating-linear-gradient(
-      to bottom,
-      rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
-      rgba(0,0,0,0.22) 3px, rgba(0,0,0,0.22) 3px);
-    opacity: 0;
-    transition: opacity var(--fade-ms) ease;
+  .panel .face .dial { opacity: .5; }
+  .panel-body {
+    padding: 40px 30px 38px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
   }
-  #crt::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(ellipse at center,
-      rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
-    opacity: 0;
-    transition: opacity var(--fade-ms) ease;
+  .glyph {
+    width: 54px; height: 54px;
+    border-radius: 50%;
+    border: 1px solid #322b25;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 22px;
+    background: rgba(0,0,0,0.3);
   }
-  body.present #crt::before { opacity: 1; animation: flicker 7s steps(60) infinite; }
-  body.present #crt::after  { opacity: 1; }
-  @keyframes flicker {
-    0%, 100% { opacity: 1; } 96% { opacity: 1; }
-    97% { opacity: 0.93; } 98% { opacity: 1; }
+  .glyph .core {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: #3a322b;
+    box-shadow: inset 0 0 4px rgba(0,0,0,0.8);
+  }
+  /* amber glyph for sign-in (signal ready to acquire); cold for idle */
+  .glyph.amber { border-color: rgba(255,178,56,0.4); }
+  .glyph.amber .core { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+
+  .panel h2 {
+    margin: 0 0 12px;
+    font-family: var(--mono);
+    font-size: 16px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    font-weight: 500;
+  }
+  .panel p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink-faint);
+    max-width: 46ch;
   }
 
-  @media (max-width: 560px) {
-    #channels { width: 150px; }
-    #emptyhint { left: 150px; }
+  /* ---- Sign-in (SIGNED-OUT) — paste token ----------------------------- */
+  .tokenbox {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    width: 100%;
+    max-width: 380px;
+    margin-top: 22px;
+    background: var(--bezel);
+    border: 1px solid #2c2620;
+    border-radius: 8px;
+    padding: 11px 14px;
+    box-shadow: inset 0 1px 4px rgba(0,0,0,0.5);
+  }
+  .tokenbox::before {
+    content: "\203a";
+    font-family: var(--mono);
+    color: var(--amber);
+    opacity: 0.7;
+    flex: 0 0 auto;
+  }
+  #tokenInput {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--ink);
+    caret-color: var(--amber);
+    font-family: var(--mono);
+    font-size: 13.5px;
+    letter-spacing: 0.04em;
+  }
+  #tokenInput::placeholder { color: var(--ink-ghost); }
+  #signinBtn {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--chassis);
+    background: var(--amber);
+    border: none;
+    border-radius: 7px;
+    padding: 9px 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 150ms ease;
+  }
+  #signinBtn:hover { filter: brightness(1.08); }
+  .how {
+    margin-top: 22px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.7;
+    letter-spacing: 0.04em;
+    color: var(--ink-ghost);
+    background: rgba(0,0,0,0.3);
+    border: 1px solid #2a241f;
+    border-radius: 7px;
+    padding: 11px 16px;
+  }
+  .how code {
+    color: var(--amber-soft);
+    background: rgba(255,178,56,0.07);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  #signinErr {
+    margin-top: 16px;
+    color: var(--rose);
+    opacity: 0;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    transition: opacity 280ms ease;
+    min-height: 1em;
+  }
+  body.signin-error #signinErr { opacity: 0.9; }
+
+  /* ---- NOT BUILDING (idle) — transmitter cold ------------------------- */
+  .how.idlehow b { color: var(--amber-soft); font-weight: 500; }
+  .signed {
+    margin-top: 18px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    color: var(--ink-ghost);
+    text-transform: uppercase;
+  }
+  .signed b { color: var(--amber-soft); font-weight: 500; }
+
+  /* ---- responsive ----------------------------------------------------- */
+  @media (max-width: 720px) {
+    #channels { flex-basis: 168px; }
+    .msg .handle { width: 96px; }
+    #emptyhint { left: 168px; }
+    .strip .session-seg { display: none; }
+  }
+  @media (max-width: 540px) {
+    #shell, .overlay { padding: 14px; }
+    .face { flex-wrap: wrap; }
+    .dial { order: 3; flex-basis: 100%; }
+    #channels { flex-basis: 140px; }
+    .msg .handle { width: 80px; font-size: 11.5px; }
+    #emptyhint { left: 140px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    #crt::before { animation: none; }
-    .msg, #emptyhint, #idle .pulse { animation: none; }
-    #cursor { animation: none; opacity: 0.8; }
+    .lamp.on .dot, #conn .pip { animation: none; }
+    .msg { animation: none; }
+    #cursor { animation: none; opacity: 0.85; }
   }
 </style>
 </head>
 <body class="signedout">
 
+  <!-- PRESENT: the transmitter rig (revealed only while building) -->
   <div id="shell">
-    <!-- PRESENT: the rooms (revealed only when building) -->
-    <div id="rooms">
-      <nav id="channels">
-        <div class="me" id="meHandle">&nbsp;</div>
-        <!-- channel buttons injected here -->
-      </nav>
-      <div id="main">
-        <div id="conn">reconnecting</div>
-        <div id="emptyhint">nothing here yet. someone may be building, silent.</div>
-        <div id="log">
-          <div id="logspacer"></div>
+    <div id="rig" role="region" aria-label="Backchannel — on air while you build">
+
+      <!-- Faceplate: wordmark · band indicator · ON-AIR lamp -->
+      <div class="face">
+        <div class="brandblock">
+          <div class="wordmark">
+            <span class="bars"><i></i><i></i><i></i><i></i></span>
+            backchannel
+          </div>
+          <div class="tagline">side-band · open only while you build</div>
         </div>
-        <div id="inputrow">
-          <span id="prompt">&nbsp;</span>
-          <div id="field">
-            <span id="mirror"></span><span id="cursor"></span>
-            <input id="say" type="text" autocomplete="off" autocorrect="off"
-                   autocapitalize="off" spellcheck="false" maxlength="1000" disabled />
+        <div class="dial" aria-hidden="true">
+          <div class="freq">88.6</div>
+          <div class="ticks"></div>
+          <div class="scale">
+            <span>80</span><span>84</span><span>88</span><span>92</span><span>96</span><span>100</span>
           </div>
         </div>
+        <div class="lamp on" title="You are present because your agent is working">
+          <span class="dot"></span> on air
+        </div>
+      </div>
+
+      <!-- Status strip -->
+      <div class="strip">
+        <div class="seg callsign"><span>call-sign</span><span class="val" id="callsign">&nbsp;</span></div>
+        <div class="seg"><span>signal</span>
+          <span class="meter" aria-label="carrier locked"><i></i><i></i><i></i><i></i></span>
+        </div>
+        <div class="seg spacer"></div>
+        <div class="seg" id="liveseg">
+          <span class="live"><span class="pip"></span>transmitting while you build</span>
+        </div>
+        <div class="seg" id="conn"><span class="pip"></span>re-acquiring signal</div>
+      </div>
+
+      <!-- Room -->
+      <div id="rooms">
+        <nav id="channels">
+          <div class="me" id="meHandle"><span class="live-dot"></span><span id="meName">&nbsp;</span></div>
+          <div class="bands-label">bands</div>
+          <!-- channel buttons injected here -->
+          <div class="footnote">
+            you drop off air the moment<br>your agent stops. no lurking.
+          </div>
+        </nav>
+
+        <section id="main">
+          <div class="wellhead">
+            <span class="ch" id="wellhead-ch">&nbsp;</span>
+            <span class="topic">tell the band what you're shipping</span>
+          </div>
+          <div id="emptyhint">no traffic on this band yet.<br>open the channel — say what you're building.</div>
+          <div id="log">
+            <div id="logspacer"></div>
+          </div>
+          <div id="inputrow">
+            <div class="mic" aria-hidden="true"><span class="dot"></span> tx</div>
+            <div id="field">
+              <span id="prompt">&nbsp;</span>
+              <span id="typedwrap"><span id="mirror"></span><span id="cursor"></span></span>
+              <input id="say" type="text" autocomplete="off" autocorrect="off"
+                     autocapitalize="off" spellcheck="false" maxlength="1000" disabled />
+            </div>
+            <button id="sendBtn" type="button">send</button>
+          </div>
+        </section>
       </div>
     </div>
   </div>
 
   <!-- SIGNED-OUT: paste-token sign-in -->
   <div id="signin" class="overlay">
-    <div class="brand">backchannel</div>
-    <div class="ask">paste your backchannel token</div>
-    <div class="tokenbox">
-      <input id="tokenInput" type="password" autocomplete="off" autocorrect="off"
-             autocapitalize="off" spellcheck="false" placeholder="token" />
-      <button id="signinBtn" type="button">enter</button>
-    </div>
-    <div id="signinErr">&nbsp;</div>
-    <div class="hint">
-      no token? run the installer, then find it at<br>
-      <code>cat ~/.config/backchannel/token</code>
+    <div class="panel">
+      <div class="face">
+        <div class="brandblock">
+          <div class="wordmark">
+            <span class="bars"><i></i><i></i><i></i><i></i></span>
+            backchannel
+          </div>
+          <div class="tagline">side-band · open only while you build</div>
+        </div>
+        <div class="dial" aria-hidden="true">
+          <div class="freq">88.6</div>
+          <div class="ticks"></div>
+          <div class="scale">
+            <span>80</span><span>84</span><span>88</span><span>92</span><span>96</span><span>100</span>
+          </div>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="glyph amber" aria-hidden="true"><span class="core"></span></div>
+        <h2>tune in</h2>
+        <p>paste your backchannel token to acquire the signal. it stays on this device — never in a link.</p>
+        <div class="tokenbox">
+          <input id="tokenInput" type="password" autocomplete="off" autocorrect="off"
+                 autocapitalize="off" spellcheck="false" placeholder="token" />
+          <button id="signinBtn" type="button">enter</button>
+        </div>
+        <div id="signinErr">&nbsp;</div>
+        <div class="how">
+          no token? run the installer, then read it with<br>
+          <code>cat ~/.config/backchannel/token</code>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- NOT BUILDING: dark hush -->
+  <!-- NOT BUILDING: transmitter cold -->
   <div id="idle" class="overlay">
-    <div class="pulse">you're not building</div>
-    <div class="sub">backchannel opens when your agent does</div>
-    <div class="who" id="idleWho">&nbsp;</div>
+    <div class="panel">
+      <div class="face">
+        <div class="brandblock">
+          <div class="wordmark">
+            <span class="bars"><i></i><i></i><i></i><i></i></span>
+            backchannel
+          </div>
+          <div class="tagline">side-band · open only while you build</div>
+        </div>
+        <div class="dial" aria-hidden="true" style="opacity:.42">
+          <div class="freq" style="color:var(--ink-ghost)">— . —</div>
+          <div class="ticks"></div>
+          <div class="scale">
+            <span>80</span><span>84</span><span>88</span><span>92</span><span>96</span><span>100</span>
+          </div>
+        </div>
+        <div class="lamp off"><span class="dot"></span> off air</div>
+      </div>
+      <div class="panel-body">
+        <div class="glyph" aria-hidden="true"><span class="core"></span></div>
+        <h2>transmitter cold</h2>
+        <p>the band goes quiet when you're not building. start an agent and you're back on air — straight into the room, mid-conversation, with everyone else who's working right now.</p>
+        <div class="how idlehow">fire a prompt at your agent &nbsp;→&nbsp; <b>you're on air</b></div>
+        <div class="signed" id="idleWho">&nbsp;</div>
+      </div>
+    </div>
   </div>
-
-  <div id="crt"></div>
 
 <script>
 (() => {
@@ -499,16 +951,28 @@
   // ---- DOM refs -----------------------------------------------------------
   const body        = document.body;
   const channelsEl  = document.getElementById("channels");
-  const meHandleEl  = document.getElementById("meHandle");
+  const meNameEl     = document.getElementById("meName");
+  const callsignEl   = document.getElementById("callsign");
+  const wellheadChEl = document.getElementById("wellhead-ch");
   const idleWhoEl   = document.getElementById("idleWho");
   const logEl       = document.getElementById("log");
   const emptyHint   = document.getElementById("emptyhint");
   const promptEl    = document.getElementById("prompt");
   const mirrorEl    = document.getElementById("mirror");
-  const fieldEl     = document.getElementById("field");
+  const fieldEl     = document.getElementById("typedwrap");
   const sayEl       = document.getElementById("say");
+  const sendBtn     = document.getElementById("sendBtn");
   const tokenInput  = document.getElementById("tokenInput");
   const signinBtn   = document.getElementById("signinBtn");
+
+  // Stable per-handle station tint (purely cosmetic; deterministic by name).
+  const STATIONS = ["s-amber", "s-cyan", "s-signal", "s-rose", "s-violet"];
+  function stationClass(name) {
+    let h = 0;
+    const s = String(name || "");
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return STATIONS[h % STATIONS.length];
+  }
 
   // ---- State --------------------------------------------------------------
   let ws            = null;
@@ -563,24 +1027,40 @@
 
   // ---- Channel switcher ---------------------------------------------------
   function renderChannels() {
-    // wipe existing channel buttons (keep the .me handle line)
+    // wipe existing channel buttons (keep .me, .bands-label, .footnote)
     channelsEl.querySelectorAll(".chan").forEach((n) => n.remove());
-    rooms.forEach((r) => {
+    const footnote = channelsEl.querySelector(".footnote");
+    rooms.forEach((r, i) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "chan" + (r.slug === currentRoom ? " active" : "");
-      b.textContent = r.name || ("#" + r.slug);
       b.dataset.slug = r.slug;
+
+      const freq = document.createElement("span");
+      freq.className = "freqno";
+      // decorative band number, stable per channel position
+      freq.textContent = (88.1 + i * 0.2).toFixed(1);
+
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = r.name || ("#" + r.slug);
+
+      b.appendChild(freq);
+      b.appendChild(name);
       b.addEventListener("click", () => {
         if (r.slug !== currentRoom) joinRoom(r.slug);
       });
-      channelsEl.appendChild(b);
+      // insert before the footnote so it stays pinned at the bottom
+      channelsEl.insertBefore(b, footnote);
     });
   }
   function markActiveChannel() {
     channelsEl.querySelectorAll(".chan").forEach((b) => {
       b.classList.toggle("active", b.dataset.slug === currentRoom);
     });
+    // reflect active channel in the well header
+    const r = rooms.find((x) => x.slug === currentRoom);
+    wellheadChEl.textContent = r ? (r.name || ("#" + r.slug)) : "";
   }
 
   function joinRoom(slug) {
@@ -603,7 +1083,7 @@
       ? opts.self
       : (m.username === username);
     const row = document.createElement("div");
-    row.className = "msg" + (isSelf ? " self" : "");
+    row.className = "msg " + stationClass(m.username) + (isSelf ? " self" : "");
 
     const h = document.createElement("span");
     h.className = "handle";
@@ -611,7 +1091,7 @@
 
     const b = document.createElement("span");
     b.className = "body";
-    b.textContent = "  " + (m.body == null ? "" : m.body);
+    b.textContent = (m.body == null ? "" : m.body);
 
     row.appendChild(h);
     row.appendChild(b);
@@ -692,15 +1172,22 @@
     // persist the token now that the server has accepted it
     try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
 
-    meHandleEl.textContent = username;
-    idleWhoEl.textContent = "signed in as " + username;
+    meNameEl.textContent = username;
+    callsignEl.textContent = username;
+    idleWhoEl.innerHTML = "signed in as <b>" + escapeHtml(username) + "</b>";
     promptEl.textContent = username;
 
     // default to the first room if we haven't chosen one
     if (!currentRoom && rooms[0]) currentRoom = rooms[0].slug;
     renderChannels();
+    markActiveChannel();
 
     applyPresence(m.present);
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   function onAuthError(message) {
@@ -776,15 +1263,23 @@
   sayEl.addEventListener("keyup", syncCursor);
   sayEl.addEventListener("click", syncCursor);
 
-  sayEl.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
+  function sendCurrent() {
     if (!present || !currentRoom) return;   // gated on building
     const body_ = sayEl.value.trim();
     if (!body_) return;
     send({ type: "say", room: currentRoom, body: body_.slice(0, 1000) });
     sayEl.value = "";
     syncCursor();
+  }
+
+  sayEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    sendCurrent();
+  });
+  sendBtn.addEventListener("click", () => {
+    sendCurrent();
+    try { sayEl.focus(); } catch (_) {}
   });
 
   // If the tab regains visibility and our socket is gone, reconnect now.
