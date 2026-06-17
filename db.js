@@ -202,7 +202,14 @@ const stmtInsertMessage = db.prepare(
 const stmtRecentMessages = db.prepare(
   'SELECT id, username, body, created_at FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT ?'
 );
-const stmtPruneMessages = db.prepare('DELETE FROM messages WHERE created_at < ?');
+// Retention fades CHANNEL chatter only. DMs and groups are private conversations
+// with full staying power — they are NEVER pruned, so they're always there when
+// you come back (you just can't read/answer them unless you're active).
+const stmtPruneMessages = db.prepare(
+  `DELETE FROM messages
+     WHERE created_at < ?
+       AND room_id IN (SELECT id FROM rooms WHERE type = 'channel')`
+);
 
 const stmtListChannels = db.prepare(
   "SELECT id, slug, name, type, position FROM rooms WHERE type = 'channel' ORDER BY position ASC, id ASC"
