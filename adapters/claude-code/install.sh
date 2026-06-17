@@ -310,10 +310,11 @@ def ensure(event, command, matcher="*"):
 
 ensure("UserPromptSubmit", enter_cmd)
 ensure("Stop", exit_cmd)
-# Questions (AskUserQuestion) don't fire UserPromptSubmit on answer, so without
-# these you'd get exited by Stop and never re-entered. PreToolUse = we're asking;
-# PostToolUse = you answered and the agent is resuming. Both re-enter you.
-ensure("PreToolUse", enter_cmd, "AskUserQuestion")
+# PreToolUse on ALL tools = a heartbeat: it keeps you 'active' for the whole run
+# (and feeds the server's active-TTL so a turn that ends without a Stop still
+# self-heals). PostToolUse(AskUserQuestion) re-enters you the moment you answer a
+# question (answers fire PostToolUse, not UserPromptSubmit).
+ensure("PreToolUse", enter_cmd, "*")
 ensure("PostToolUse", enter_cmd, "AskUserQuestion")
 
 with open(path, "w") as f:
@@ -349,7 +350,7 @@ if [ -z "$merged_via" ] && command -v jq >/dev/null 2>&1; then
       | .hooks.Stop = ( (strip("Stop"))
           + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $exitc } ] } ] )
       | .hooks.PreToolUse = ( (strip("PreToolUse"))
-          + [ { "matcher": "AskUserQuestion", "hooks": [ { "type": "command", "command": $enter } ] } ] )
+          + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $enter } ] } ] )
       | .hooks.PostToolUse = ( (strip("PostToolUse"))
           + [ { "matcher": "AskUserQuestion", "hooks": [ { "type": "command", "command": $enter } ] } ] )
       ' "$_base" > "$_tmp" 2>/dev/null; then
@@ -378,7 +379,7 @@ if [ -z "$merged_via" ]; then
       { "matcher": "*", "hooks": [ { "type": "command", "command": "$_exit_j" } ] }
     ],
     "PreToolUse": [
-      { "matcher": "AskUserQuestion", "hooks": [ { "type": "command", "command": "$_enter_j" } ] }
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "$_enter_j" } ] }
     ],
     "PostToolUse": [
       { "matcher": "AskUserQuestion", "hooks": [ { "type": "command", "command": "$_enter_j" } ] }

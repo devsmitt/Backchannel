@@ -38,6 +38,7 @@ import {
   setTagline,
   recordEnter,
   recordExit,
+  touchActive,
   allUsersForRoster,
   listChannels,
   roomBySlug,
@@ -67,6 +68,7 @@ const BUILDING_WINDOW_MS = Number(process.env.BUILDING_WINDOW) || 30 * 60 * 1000
 const RETENTION_MS = Number(process.env.RETENTION_MS) || 6 * 60 * 60 * 1000;        // prune messages older than this
 const CAMP_CEILING_MS = Number(process.env.CAMP_CEILING) || 60 * 60 * 1000;         // forced exit + build_seconds cap
 const SWEEP_MS = Number(process.env.SWEEP_MS) || 60 * 1000;                         // presence + retention sweep
+const ACTIVE_TTL_MS = Number(process.env.ACTIVE_TTL) || 4 * 60 * 1000;              // active self-heals to building if no /enter heartbeat within this
 
 const MAX_BODY_LEN = 1000;              // hard cap on a chat line.
 const HISTORY_LIMIT = 50;               // backlog returned on room entry.
@@ -194,7 +196,7 @@ function sweepPairings(now = Date.now()) {
 function presenceState(userId) {
   let s = presence.get(userId);
   if (!s) {
-    s = { present: false, enterAt: null, timer: null };
+    s = { present: false, enterAt: null, lastPing: 0, timer: null };
     presence.set(userId, s);
   }
   return s;
@@ -280,19 +282,27 @@ function broadcastRoster() {
 
 function enterUser(userId) {
   const s = presenceState(userId);
+  const now = Date.now();
+  const wasPresent = s.present;
   s.present = true;
-  s.enterAt = Date.now();
+  s.lastPing = now;                       // heartbeat for the active TTL
+  if (!wasPresent) s.enterAt = now;       // session start — only on a real transition
 
   // (Re)start the camping ceiling timer. A normal agent run is well under it;
-  // re-firing /enter on a long legitimate session keeps it alive.
+  // each /enter heartbeat keeps a long legitimate session alive.
   if (s.timer) clearTimeout(s.timer);
   s.timer = setTimeout(() => forceExit(userId), CAMP_CEILING_MS);
 
-  // Persist builder status: bump total_builds + streak, stamp last_active.
-  try { recordEnter(userId, s.enterAt); } catch (e) { console.error('[backchannel] recordEnter:', e); }
-
-  pushToUser(userId, { type: 'presence', present: true });
-  broadcastRoster();
+  if (!wasPresent) {
+    // A genuine NEW session: count it (sessions + streak), stamp last_active.
+    try { recordEnter(userId, now); } catch (e) { console.error('[backchannel] recordEnter:', e); }
+    pushToUser(userId, { type: 'presence', present: true });
+    broadcastRoster();
+  } else {
+    // Already present (heartbeat / question / repeated tool use): refresh
+    // activity only — do NOT inflate the session count. No re-broadcast needed.
+    try { touchActive(userId, now); } catch (e) { console.error('[backchannel] touchActive:', e); }
+  }
 }
 
 function exitUser(userId) {
@@ -940,6 +950,16 @@ const sweep = setInterval(() => {
   try {
     pruneOldMessages(RETENTION_MS);
   } catch (e) { console.error('[backchannel] prune:', e); }
+
+  // Self-heal stuck-active: if a present user hasn't sent an /enter heartbeat
+  // within ACTIVE_TTL (e.g. their turn ended without a Stop hook firing), treat
+  // it as an exit so they drop to 'building' and their time is credited.
+  try {
+    const now = Date.now();
+    for (const [userId, s] of presence) {
+      if (s.present && s.lastPing && now - s.lastPing > ACTIVE_TTL_MS) exitUser(userId);
+    }
+  } catch (e) { console.error('[backchannel] active-ttl sweep:', e); }
 
   try { sweepPairings(); } catch (e) { console.error('[backchannel] pair sweep:', e); }
 

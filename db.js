@@ -358,6 +358,15 @@ export function recordExit(userId, enterAtMs, campCeilingMs, now = Date.now()) {
 }
 
 /**
+ * Refresh activity WITHOUT counting a new session. Used for heartbeat /enter
+ * pings (PreToolUse etc.) that arrive while the user is already present — they
+ * keep last_active fresh but must NOT inflate total_builds (sessions).
+ */
+export function touchActive(userId, now = Date.now()) {
+  db.prepare('UPDATE users SET last_active = ? WHERE id = ?').run(now, userId);
+}
+
+/**
  * All users with the fields the roster needs. Presence (active/building/offline)
  * is derived by the SERVER from in-memory presence + last_active + the building
  * window — this returns the raw materials sorted by recency of activity.
