@@ -66,9 +66,17 @@ const PORT = process.env.PORT || 8080;
 
 const BUILDING_WINDOW_MS = Number(process.env.BUILDING_WINDOW) || 30 * 60 * 1000;   // active→offline floor for "building"
 const RETENTION_MS = Number(process.env.RETENTION_MS) || 6 * 60 * 60 * 1000;        // prune messages older than this
-const CAMP_CEILING_MS = Number(process.env.CAMP_CEILING) || 60 * 60 * 1000;         // forced exit + build_seconds cap
 const SWEEP_MS = Number(process.env.SWEEP_MS) || 60 * 1000;                         // presence + retention sweep
-const ACTIVE_TTL_MS = Number(process.env.ACTIVE_TTL) || 4 * 60 * 1000;              // active self-heals to building if no /enter heartbeat within this
+// Inactivity timeout: how long with NO /enter signal (UserPromptSubmit OR the
+// PreToolUse heartbeat) before we assume the turn ended abnormally (interrupt,
+// silent stall — where Stop never fires) and drop you to 'building'. The
+// heartbeat makes this measure INACTIVITY, not turn length, so normal long work
+// (multi-tool runs, minutes between tools) never trips it — only a genuinely
+// idle/stuck session does. Generous on purpose: never kick someone mid-build.
+const INACTIVITY_MS = Number(process.env.INACTIVITY_TIMEOUT) || 20 * 60 * 1000;
+// Separate, larger cap on how much active time ONE session can credit to
+// build_seconds (long sessions still count; a stuck one can't credit absurd time).
+const BUILD_CAP_MS = Number(process.env.BUILD_CAP) || 2 * 60 * 60 * 1000;
 
 const MAX_BODY_LEN = 1000;              // hard cap on a chat line.
 const HISTORY_LIMIT = 50;               // backlog returned on room entry.
@@ -196,7 +204,7 @@ function sweepPairings(now = Date.now()) {
 function presenceState(userId) {
   let s = presence.get(userId);
   if (!s) {
-    s = { present: false, enterAt: null, lastPing: 0, timer: null };
+    s = { present: false, enterAt: null, timer: null };
     presence.set(userId, s);
   }
   return s;
@@ -285,13 +293,14 @@ function enterUser(userId) {
   const now = Date.now();
   const wasPresent = s.present;
   s.present = true;
-  s.lastPing = now;                       // heartbeat for the active TTL
   if (!wasPresent) s.enterAt = now;       // session start — only on a real transition
 
-  // (Re)start the camping ceiling timer. A normal agent run is well under it;
-  // each /enter heartbeat keeps a long legitimate session alive.
+  // (Re)start the inactivity timer. Every /enter (incl. the PreToolUse heartbeat)
+  // resets it, so it only fires after INACTIVITY_MS of true silence — catching
+  // turns that ended without a Stop (interrupt / silent stall) without ever
+  // kicking someone whose agent is still working.
   if (s.timer) clearTimeout(s.timer);
-  s.timer = setTimeout(() => forceExit(userId), CAMP_CEILING_MS);
+  s.timer = setTimeout(() => forceExit(userId), INACTIVITY_MS);
 
   if (!wasPresent) {
     // A genuine NEW session: count it (sessions + streak), stamp last_active.
@@ -315,7 +324,7 @@ function exitUser(userId) {
 
   // Persist builder status: add active duration (capped) to build_seconds,
   // stamp last_active=now (so the user shows as 'building' for the window).
-  try { recordExit(userId, enterAt, CAMP_CEILING_MS); } catch (e) { console.error('[backchannel] recordExit:', e); }
+  try { recordExit(userId, enterAt, BUILD_CAP_MS); } catch (e) { console.error('[backchannel] recordExit:', e); }
 
   pushToUser(userId, { type: 'presence', present: false });
   broadcastRoster();
@@ -330,7 +339,7 @@ function forceExit(userId) {
   s.timer = null;
   s.present = false;
   s.enterAt = null;
-  try { recordExit(userId, enterAt, CAMP_CEILING_MS); } catch (e) { console.error('[backchannel] forceExit:', e); }
+  try { recordExit(userId, enterAt, BUILD_CAP_MS); } catch (e) { console.error('[backchannel] forceExit:', e); }
   pushToUser(userId, { type: 'presence', present: false });
   broadcastRoster();
 }
@@ -950,16 +959,6 @@ const sweep = setInterval(() => {
   try {
     pruneOldMessages(RETENTION_MS);
   } catch (e) { console.error('[backchannel] prune:', e); }
-
-  // Self-heal stuck-active: if a present user hasn't sent an /enter heartbeat
-  // within ACTIVE_TTL (e.g. their turn ended without a Stop hook firing), treat
-  // it as an exit so they drop to 'building' and their time is credited.
-  try {
-    const now = Date.now();
-    for (const [userId, s] of presence) {
-      if (s.present && s.lastPing && now - s.lastPing > ACTIVE_TTL_MS) exitUser(userId);
-    }
-  } catch (e) { console.error('[backchannel] active-ttl sweep:', e); }
 
   try { sweepPairings(); } catch (e) { console.error('[backchannel] pair sweep:', e); }
 

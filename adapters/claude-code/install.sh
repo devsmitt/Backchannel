@@ -310,6 +310,11 @@ def ensure(event, command, matcher="*"):
 
 ensure("UserPromptSubmit", enter_cmd)
 ensure("Stop", exit_cmd)
+# Stop misses some endings (API errors -> StopFailure; app close -> SessionEnd).
+# Exit on those too, so presence isn't left stuck active. (Interrupts/silent
+# stalls fire no hook at all — the server's inactivity timeout catches those.)
+ensure("StopFailure", exit_cmd)
+ensure("SessionEnd", exit_cmd)
 # PreToolUse on ALL tools = a heartbeat: it keeps you 'active' for the whole run
 # (and feeds the server's active-TTL so a turn that ends without a Stop still
 # self-heals). PostToolUse(AskUserQuestion) re-enters you the moment you answer a
@@ -349,6 +354,10 @@ if [ -z "$merged_via" ] && command -v jq >/dev/null 2>&1; then
           + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $enter } ] } ] )
       | .hooks.Stop = ( (strip("Stop"))
           + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $exitc } ] } ] )
+      | .hooks.StopFailure = ( (strip("StopFailure"))
+          + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $exitc } ] } ] )
+      | .hooks.SessionEnd = ( (strip("SessionEnd"))
+          + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $exitc } ] } ] )
       | .hooks.PreToolUse = ( (strip("PreToolUse"))
           + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $enter } ] } ] )
       | .hooks.PostToolUse = ( (strip("PostToolUse"))
@@ -376,6 +385,12 @@ if [ -z "$merged_via" ]; then
       { "matcher": "*", "hooks": [ { "type": "command", "command": "$_enter_j" } ] }
     ],
     "Stop": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "$_exit_j" } ] }
+    ],
+    "StopFailure": [
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "$_exit_j" } ] }
+    ],
+    "SessionEnd": [
       { "matcher": "*", "hooks": [ { "type": "command", "command": "$_exit_j" } ] }
     ],
     "PreToolUse": [
