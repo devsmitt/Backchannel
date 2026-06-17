@@ -648,6 +648,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- The Cursor adapter, served self-contained with origin baked in ----
+  if (method === 'GET' && urlPath === '/cursor.sh') {
+    const proto =
+      String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() ||
+      (req.socket && req.socket.encrypted ? 'https' : 'http');
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    const origin = host ? proto + '://' + host : '';
+    fs.readFile(path.join(__dirname, 'adapters', 'cursor', 'install.sh'), 'utf8', (err, data) => {
+      if (err) { sendText(res, 500, 'cursor adapter unavailable'); return; }
+      const baked = origin ? data.split('https://backchannel.example').join(origin) : data;
+      res.writeHead(200, { 'Content-Type': 'text/x-shellscript; charset=utf-8', ...CORS_HEADERS });
+      res.end(baked);
+    });
+    return;
+  }
+
   // --- Static assets (the app page) --------------------------------------
   if (method === 'GET') { serveStatic(req, res); return; }
 

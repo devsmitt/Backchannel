@@ -164,12 +164,19 @@
   #tokenInput::placeholder { color: var(--ghost); }
   .gatebtn { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bg); background: var(--live); border: none; border-radius: 6px; padding: 8px 15px; font-weight: 600; cursor: pointer; }
   .gatebtn:hover { filter: brightness(1.07); }
-  .installblock { margin: 30px auto 0; max-width: 360px; text-align: left; }
-  .installblock .newlabel { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint); margin-bottom: 9px; }
-  .installblock .cmd { display: flex; align-items: center; gap: 0.6em; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--dim); background: rgba(255,255,255,0.04); border: 1px solid var(--line); border-radius: 8px; padding: 11px 14px; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
-  .installblock .cmd .prompt { color: var(--faint); flex: 0 0 auto; }
-  .installblock .sub { font-family: var(--mono); font-size: 10.5px; line-height: 1.7; letter-spacing: 0.02em; color: var(--ghost); margin-top: 10px; }
-  .installblock .sub code { color: var(--faint); }
+  .installblock { margin: 28px auto 0; max-width: 380px; text-align: left; }
+  .installblock .reveal { display: block; margin: 0 auto; background: none; border: none; cursor: pointer; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.12em; color: var(--dim); padding: 6px; }
+  .installblock .reveal:hover { color: var(--live); }
+  .installblock .installsteps { margin-top: 16px; }
+  .installblock ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  .installblock ol.steps li { position: relative; padding-left: 26px; margin-bottom: 14px; font-size: 13px; line-height: 1.55; color: var(--dim); }
+  .installblock ol.steps li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 0; width: 17px; height: 17px; border: 1px solid var(--line); border-radius: 50%; font-family: var(--mono); font-size: 10px; color: var(--faint); display: flex; align-items: center; justify-content: center; }
+  .installblock .cmd { display: flex; align-items: center; gap: 0.6em; margin-top: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text); background: rgba(255,255,255,0.04); border: 1px solid var(--line); border-radius: 8px; padding: 10px 10px 10px 13px; }
+  .installblock .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  .installblock .cmd code::-webkit-scrollbar { display: none; }
+  .installblock .copybtn { flex: 0 0 auto; background: rgba(95,217,154,0.1); border: 1px solid rgba(95,217,154,0.25); color: var(--live); border-radius: 6px; font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer; }
+  .installblock .copybtn:hover { background: rgba(95,217,154,0.18); }
+  .installblock .sub { font-family: var(--mono); font-size: 10.5px; line-height: 1.7; letter-spacing: 0.02em; color: var(--ghost); margin-top: 14px; }
   #signinErr { margin-top: 16px; color: var(--danger); opacity: 0; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em; transition: opacity 240ms ease; min-height: 1em; }
   body.signin-error #signinErr { opacity: 0.95; }
   .signedas { margin-top: 20px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; color: var(--ghost); text-transform: uppercase; }
@@ -307,9 +314,17 @@
       </div>
       <div id="signinErr">&nbsp;</div>
       <div class="installblock">
-        <div class="newlabel">new here?</div>
-        <div class="cmd"><span class="prompt">$</span><span id="installCmd"></span></div>
-        <div class="sub">installs the agent + writes your token locally.</div>
+        <button class="reveal" id="newHereBtn" type="button">new here? &rarr;</button>
+        <div class="installsteps" id="installSteps" hidden>
+          <ol class="steps">
+            <li>run this in your terminal
+              <div class="cmd"><code id="installCmd"></code><button class="copybtn" id="copyInstall" type="button">copy</button></div>
+            </li>
+            <li>claim a username when it asks</li>
+            <li>your browser opens — signed in. fire a prompt at your agent and you're in.</li>
+          </ol>
+          <div class="sub">one install signs you in on this browser for good. you appear in the channel only while your agent is working.</div>
+        </div>
       </div>
     </div>
   </div>
@@ -1108,8 +1123,25 @@
   // ---- Install command (sign-in page) -------------------------------------
   // Built from location.origin so it always points at this deployment.
   (() => {
+    const cmd = "curl -fsSL " + location.origin + "/install.sh | sh";
     const el = document.getElementById("installCmd");
-    if (el) el.textContent = "curl -fsSL " + location.origin + "/install.sh | sh";
+    if (el) el.textContent = cmd;
+    const reveal = document.getElementById("newHereBtn");
+    const steps  = document.getElementById("installSteps");
+    if (reveal && steps) reveal.addEventListener("click", () => {
+      steps.hidden = !steps.hidden;
+      reveal.textContent = steps.hidden ? "new here? →" : "new here? ↓";
+    });
+    const copy = document.getElementById("copyInstall");
+    if (copy) copy.addEventListener("click", async () => {
+      let ok = false;
+      try { await navigator.clipboard.writeText(cmd); ok = true; }
+      catch (_) {
+        try { const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); ok = document.execCommand("copy"); } catch (_) {}
+      }
+      copy.textContent = ok ? "copied" : "press ⌘C";
+      setTimeout(() => { copy.textContent = "copy"; }, 1500);
+    });
   })();
 
   // ---- Pairing on load ----------------------------------------------------

@@ -61,26 +61,35 @@ fi
 TOKEN="$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\r\n')"
 [ -n "$TOKEN" ] || die "token file $TOKEN_FILE is empty."
 
-# Make sure the bundled hook templates are present.
-[ -r "$SRC_HOOKS_DIR/enter.sh" ] || die "missing bundled hook: $SRC_HOOKS_DIR/enter.sh"
-[ -r "$SRC_HOOKS_DIR/exit.sh" ]  || die "missing bundled hook: $SRC_HOOKS_DIR/exit.sh"
-
 # --------------------------------------------------------------------------
-# Install hook scripts (bake the server URL in, make executable)
+# Install hook scripts (written inline so this installer is self-contained and
+# can be piped straight from the server: curl .../cursor.sh | sh). The server
+# URL is baked into the body below; both still honor a BACKCHANNEL_SERVER env
+# override at runtime. Each hook drains stdin, POSTs only the token, exits 0.
 # --------------------------------------------------------------------------
 umask 077
 mkdir -p "$HOOKS_DIR"
 
-# Replace the __BACKCHANNEL_SERVER__ placeholder with the real origin. Use a
-# delimiter unlikely to appear in a URL (|). The scripts still honor a runtime
-# BACKCHANNEL_SERVER env override regardless.
-install_hook() {
-  _src="$1"; _dst="$2"
-  sed "s|__BACKCHANNEL_SERVER__|$SERVER|g" "$_src" > "$_dst"
-  chmod 700 "$_dst" 2>/dev/null || :
+write_hook() {  # $1 = dest path, $2 = endpoint (/enter|/exit)
+  cat > "$1" <<EOF
+#!/bin/sh
+set -eu
+SERVER="\${BACKCHANNEL_SERVER:-$SERVER}"
+SERVER="\${SERVER%/}"
+TOKEN_FILE="\${BACKCHANNEL_TOKEN_FILE:-\$HOME/.config/backchannel/token}"
+cat >/dev/null 2>&1 || :
+[ -r "\$TOKEN_FILE" ] || exit 0
+TOKEN="\$(cat "\$TOKEN_FILE" 2>/dev/null | tr -d '\r\n')"
+[ -n "\$TOKEN" ] || exit 0
+command -v curl >/dev/null 2>&1 && \\
+  curl -sS -m 2 -X POST -H 'Content-Type: application/json' \\
+    -d "{\\"token\\":\\"\$TOKEN\\"}" "\$SERVER$2" >/dev/null 2>&1 &
+exit 0
+EOF
+  chmod 700 "$1" 2>/dev/null || :
 }
-install_hook "$SRC_HOOKS_DIR/enter.sh" "$HOOKS_DIR/enter.sh"
-install_hook "$SRC_HOOKS_DIR/exit.sh"  "$HOOKS_DIR/exit.sh"
+write_hook "$HOOKS_DIR/enter.sh" "/enter"
+write_hook "$HOOKS_DIR/exit.sh"  "/exit"
 
 ENTER_CMD="$HOOKS_DIR/enter.sh"
 EXIT_CMD="$HOOKS_DIR/exit.sh"
