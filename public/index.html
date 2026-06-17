@@ -127,6 +127,11 @@
   .msg.self .name { color: var(--live); }
   .msg .name .time { color: var(--ghost); font-size: 11px; margin-left: 9px; cursor: default; }
   .msg .text { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg .text a { color: var(--live); text-decoration: none; }
+  .msg .text a:hover { text-decoration: underline; }
+  .msg .text code { font-family: var(--mono); font-size: 12.5px; background: rgba(255,255,255,0.06); border: 1px solid var(--line); border-radius: 4px; padding: 0.5px 5px; }
+  .msg .text pre.code { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; background: rgba(255,255,255,0.045); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 6px 0 4px; overflow-x: auto; white-space: pre; scrollbar-width: thin; }
+  .msg .text pre.code code { background: none; border: none; padding: 0; font-size: 12.5px; }
 
   .convo-empty { color: var(--faint); font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.04em; padding: 8px 0; }
 
@@ -385,9 +390,34 @@
   let signedIn      = false;     // have we gotten a {welcome}?
   let lastSender    = null;      // for message grouping
   let unread        = {};        // roomKey -> count (rooms we're not viewing)
+  let hiddenUnread  = 0;         // msgs in the current room that arrived while the tab was hidden
   let showAllOffline = false;    // roster offline expand toggle
   let lastRoster    = { active: [], building: [], offline: [] };
   let me            = null;      // {username,tagline,streak,totalBuilds,buildSeconds,since}
+
+  // ---- Unread → tab title + favicon ----------------------------------------
+  function totalUnread() {
+    let n = hiddenUnread;
+    for (const k in unread) n += unread[k] || 0;
+    return n;
+  }
+  function faviconSvg(dotColor) {
+    return "data:image/svg+xml," + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+      '<rect width="32" height="32" rx="7" fill="#0a0b0d"/>' +
+      '<circle cx="16" cy="16" r="5" fill="' + dotColor + '"/></svg>'
+    );
+  }
+  function setFavicon(hasUnread) {
+    let link = document.getElementById("favicon");
+    if (!link) { link = document.createElement("link"); link.id = "favicon"; link.rel = "icon"; document.head.appendChild(link); }
+    link.href = faviconSvg(hasUnread ? "#5fd99a" : "#565b61");
+  }
+  function updateTitle() {
+    const n = totalUnread();
+    document.title = n > 0 ? "(" + (n > 99 ? "99+" : n) + ") backchannel" : "backchannel";
+    setFavicon(n > 0);
+  }
 
   let reconnectDelay = 500;
   const RECONNECT_MAX = 15000;
@@ -406,6 +436,27 @@
     const s = String(u == null ? "" : u).trim();
     if (/^https?:\/\//i.test(s) && s.length <= 200) return s;
     return null;
+  }
+
+  // Render a chat body to SAFE html: escape EVERYTHING first, then add only our
+  // own known-safe tags. Order matters — protect code spans/blocks with
+  // placeholders so links never get injected inside them; only http(s) links.
+  function formatBody(raw) {
+    var SENT = String.fromCharCode(0);
+    var s = esc(String(raw == null ? "" : raw));
+    var stash = [];
+    var keep = function (html) { stash.push(html); return SENT + (stash.length - 1) + SENT; };
+    s = s.replace(/```\r?\n?([\s\S]*?)```/g, function (_, c) {
+      return keep('<pre class="code"><code>' + c.replace(/\n+$/, "") + "</code></pre>");
+    });
+    s = s.replace(/`([^`\n]+)`/g, function (_, c) { return keep("<code>" + c + "</code>"); });
+    s = s.replace(/https?:\/\/[^\s<]+/g, function (u) {
+      var trail = "";
+      var t = u.match(/[)\].,;:!?'"]+$/);
+      if (t) { trail = t[0]; u = u.slice(0, -trail.length); }
+      return '<a href="' + u + '" target="_blank" rel="noopener noreferrer nofollow">' + u + "</a>" + trail;
+    });
+    return s.replace(new RegExp(SENT + "(\\d+)" + SENT, "g"), function (_, i) { return stash[Number(i)]; });
   }
 
   // ---- View state machine -------------------------------------------------
@@ -619,6 +670,7 @@
   function joinRoom(key) {
     currentRoom = key;
     unread[key] = 0;
+    updateTitle();
     lastSender = null;
     renderRooms(); renderDms();
     markRoomHead();
@@ -670,7 +722,7 @@
     }
     const textEl = document.createElement("div");
     textEl.className = "text";
-    textEl.textContent = (m.body == null ? "" : m.body);  // TEXT, never HTML
+    textEl.innerHTML = formatBody(m.body);  // formatBody escapes first, then adds only safe code/link tags
     row.appendChild(textEl);
     streamColEl.appendChild(row);
     lastSender = m.username;
@@ -771,9 +823,13 @@
       if (ph) ph.remove();
       appendMsg(m, !!m.self || m.username === username);
       if (wasBottom || m.self || m.username === username) scrollBottom();
+      // Even in the current room, a message that lands while the tab is hidden
+      // is "unread" until you look back — surface it in the title/favicon.
+      if (document.hidden && !(m.self || m.username === username)) { hiddenUnread++; updateTitle(); }
     } else {
       unread[m.room] = (unread[m.room] || 0) + 1;
       renderRooms(); renderDms();
+      updateTitle();
     }
   }
 
@@ -1112,13 +1168,17 @@
     }
   };
 
-  // reconnect on tab focus if the socket died
+  // reconnect on tab focus if the socket died; also clear "hidden" unread since
+  // you're now looking at the current room.
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && token && !ws && !manualClose) {
-      reconnectDelay = 500;
-      connect();
+    if (document.visibilityState === "visible") {
+      hiddenUnread = 0;
+      updateTitle();
+      if (token && !ws && !manualClose) { reconnectDelay = 500; connect(); }
     }
   });
+
+  setFavicon(false);  // give the tab its mark from the start
 
   // ---- Install command (sign-in page) -------------------------------------
   // Built from location.origin so it always points at this deployment.
