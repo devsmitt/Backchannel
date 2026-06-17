@@ -21,6 +21,7 @@
 // Everything else is Node stdlib.
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,6 +75,9 @@ const USERNAME_RE = /^[a-z0-9_-]{2,24}$/;
 const RECOVER_MAX_TRIES = 5;            // recovery-phrase guesses allowed per window
 const RECOVER_WINDOW_MS = 10 * 60 * 1000;
 
+const PAIR_CODE_TTL_MS = 5 * 60 * 1000; // a pairing code is valid for 5 minutes
+const PAIR_CODE_LEN = 8;                // url-safe chars in a pairing code
+
 // Rate-limit recovery-phrase guessing per username (preserved from v1).
 const recoverTries = new Map();         // username -> { count, resetAt }
 function recoverBlocked(username) {
@@ -97,6 +101,38 @@ function recoverBlocked(username) {
 
 const presence = new Map();
 const userSockets = new Map();
+
+// ---------------------------------------------------------------------------
+// Pairing store — ephemeral, in-memory only (meaningless across a restart).
+//
+// A pairing code lets a freshly-installed device (which knows the long token
+// from disk) hand the BROWSER its identity without ever putting that long token
+// in a URL. The flow:
+//   1. the device calls POST /pair/new {token} -> gets a short single-use code
+//   2. that short code (single-use, 5-min TTL) may safely appear in a URL the
+//      user opens in the browser
+//   3. the browser calls POST /pair/redeem {code} -> gets the raw token back and
+//      stores it locally; the code is burned on first redeem
+//
+// code -> { userId, token, expiresAt, used }
+// ---------------------------------------------------------------------------
+
+const pairings = new Map();
+
+// Mint a url-safe code. base64url alphabet (A–Z a–z 0–9 - _), no padding, so it
+// is safe to drop into a URL path/query without further encoding.
+function newPairCode() {
+  // base64url emits 4 chars per 3 bytes; ask for enough bytes then slice.
+  const bytes = crypto.randomBytes(PAIR_CODE_LEN);
+  return bytes.toString('base64url').slice(0, PAIR_CODE_LEN);
+}
+
+// Drop expired/used pairings so the Map can't grow unbounded under churn.
+function sweepPairings(now = Date.now()) {
+  for (const [code, rec] of pairings) {
+    if (rec.used || now >= rec.expiresAt) pairings.delete(code);
+  }
+}
 
 function presenceState(userId) {
   let s = presence.get(userId);
@@ -353,6 +389,54 @@ const server = http.createServer(async (req, res) => {
       // New token hash collides with an existing user's token — refuse.
       sendJson(res, 403, { error: 'no match' });
     }
+    return;
+  }
+
+  // --- Pairing: mint a single-use code from a (long) token --------------
+  // {token} -> resolve to a user; mint an 8-char url-safe, 5-min, single-use
+  // code bound to that user. Returns 200 {code}. Unknown token -> 400.
+  // The long token is consumed here and stored only in memory; it never leaves
+  // in a URL — only the short code does.
+  if (method === 'POST' && urlPath === '/pair/new') {
+    const body = await readJsonBody(req);
+    const token = body && typeof body.token === 'string' ? body.token.trim() : '';
+    if (!token) { sendJson(res, 400, { error: 'bad request' }); return; }
+    const user = userByTokenHash(sha256(token));
+    if (!user) { sendJson(res, 400, { error: 'bad request' }); return; }
+
+    sweepPairings();
+    // Mint a code; on the astronomically unlikely collision, retry.
+    let code = newPairCode();
+    while (pairings.has(code)) code = newPairCode();
+    pairings.set(code, {
+      userId: user.id,
+      token,
+      expiresAt: Date.now() + PAIR_CODE_TTL_MS,
+      used: false,
+    });
+    sendJson(res, 200, { code });
+    return;
+  }
+
+  // --- Pairing: redeem a code for the raw token -------------------------
+  // {code} -> if valid + unexpired + unused: burn it, return 200 {token}.
+  // Invalid / expired / already-used -> 404 {error}. The browser stores the
+  // returned token locally for subsequent auth.
+  if (method === 'POST' && urlPath === '/pair/redeem') {
+    const body = await readJsonBody(req);
+    const code = body && typeof body.code === 'string' ? body.code.trim() : '';
+    const rec = code ? pairings.get(code) : null;
+
+    if (!rec || rec.used || Date.now() >= rec.expiresAt) {
+      if (rec) pairings.delete(code); // burn expired/used on sight
+      sendJson(res, 404, { error: 'invalid code' });
+      return;
+    }
+
+    // Single-use: mark used and remove so it can never be redeemed twice.
+    rec.used = true;
+    pairings.delete(code);
+    sendJson(res, 200, { token: rec.token });
     return;
   }
 
@@ -669,6 +753,8 @@ const sweep = setInterval(() => {
   try {
     pruneOldMessages(RETENTION_MS);
   } catch (e) { console.error('[backchannel] prune:', e); }
+
+  try { sweepPairings(); } catch (e) { console.error('[backchannel] pair sweep:', e); }
 
   try {
     const roster = buildRoster();

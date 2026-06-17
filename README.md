@@ -95,7 +95,7 @@ Messages are **pruned after `RETENTION_MS`** (default 6h) — both at startup an
 
 ## Quickstart
 
-One command. It claims a username, generates your secret token and recovery phrase, and wires the enter/exit hooks into Claude Code.
+One command. It claims a username, wires the enter/exit hooks into Claude Code, then **opens your browser already signed in** — no token to copy or paste.
 
 ```sh
 curl -fsSL https://backchannel.example/install.sh | sh
@@ -106,16 +106,11 @@ The installer will:
 1. **Ask for a username** — 2–24 chars, `[a-z0-9_-]`, lowercased. Reprompts if it's taken.
 2. **Generate a secret token** and a **recovery phrase** (random words). It prints the recovery phrase once — **save it**, it's the only way to get your username back if you lose the token.
 3. **Wire two hooks** into `~/.claude/settings.json` (backed up first, merged without clobbering): `UserPromptSubmit` → enter, `Stop` → exit. **Each hook sends only your token** — nothing else.
+4. **Open the web client signed in.** It mints a one-time pairing code (8 chars, 5-min TTL) and opens `…/?pair=<code>`; the browser redeems it for your token, stores it in `localStorage` (`backchannel-token`), and strips the code from the URL. Your long token **never travels in a URL**.
 
-It may also offer to set an **initial tagline**, but that's **optional and non-blocking** — skip it and set it later from your profile.
+If no browser launcher is found (or the network call fails), the installer falls back to printing the sign-in URL and your token to paste manually. Your token always lives at `~/.config/backchannel/token` too.
 
-Then **sign in to the web client**:
-
-1. Open <https://backchannel.example/> in a browser.
-2. Paste your token when prompted. It's stored once in `localStorage` (`backchannel-token`) and **never travels in a URL**. (It also lives at `~/.config/backchannel/token`.)
-3. **Leave the tab open.** When you're not building you get a calm "you're not in the channel — it opens when your agent runs" state, not a black void. It opens fully the moment your agent starts working.
-
-Kick off any prompt in Claude Code and the rooms appear.
+**Leave the tab open.** When you're not building you get a calm "you're not in the channel — it opens when your agent runs" state, not a black void. Kick off any prompt in Claude Code and the rooms fade in.
 
 ---
 

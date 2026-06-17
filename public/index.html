@@ -93,16 +93,17 @@
   .empty-note { padding: 2px 22px 0; font-family: var(--mono); font-size: 11px; color: var(--ghost); }
 
   /* presence roster */
-  .person { display: flex; gap: 11px; padding: 7px 22px; align-items: flex-start; cursor: pointer; }
+  .person { display: flex; gap: 11px; padding: 8px 22px; align-items: flex-start; cursor: pointer; line-height: 1.45; }
   .person:hover { background: var(--hover); }
   .person .dot { margin-top: 6px; }
   .person .who { min-width: 0; flex: 1; }
-  .person .name { font-size: 14px; display: flex; align-items: center; gap: 6px; }
+  .person .name { font-size: 14px; color: var(--text); display: flex; align-items: center; gap: 8px; }
   .person.idle .name { color: var(--dim); }
   .person.you .name { color: var(--live); }
-  .person .streak { font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: 0.02em; }
-  .person.you .streak { color: var(--live); opacity: 0.8; }
-  .person .doing { font-size: 12.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .person .name .handle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .person .streak { margin-left: auto; padding-left: 8px; font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: 0.02em; flex: 0 0 auto; }
+  .person.you .streak { color: var(--live); opacity: 0.85; }
+  .person .doing { font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
   .subhead { padding: 4px 22px 2px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ghost); }
   .morelink { padding: 8px 22px 0; font-family: var(--mono); font-size: 11.5px; color: var(--faint); cursor: pointer; }
   .morelink:hover { color: var(--dim); }
@@ -134,8 +135,7 @@
   .compose .caret { color: var(--live); font-family: var(--mono); }
   .compose input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font: inherit; }
   .compose input::placeholder { color: var(--faint); }
-  .hint { padding: 6px 40px 16px; }
-  .hint .col { font-family: var(--mono); font-size: 11px; color: var(--ghost); letter-spacing: 0.03em; }
+  .compose { padding-bottom: 16px; }
 
   /* ============================================================ SIGNED-OUT + NOT-PRESENT (calm states) */
   .gate { display: none; min-height: 100vh; align-items: center; justify-content: center; padding: 28px 22px; }
@@ -160,8 +160,12 @@
   #tokenInput::placeholder { color: var(--ghost); }
   .gatebtn { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bg); background: var(--live); border: none; border-radius: 6px; padding: 8px 15px; font-weight: 600; cursor: pointer; }
   .gatebtn:hover { filter: brightness(1.07); }
-  .how { margin: 24px auto 0; max-width: 360px; font-family: var(--mono); font-size: 11px; line-height: 1.7; letter-spacing: 0.03em; color: var(--ghost); background: var(--rail); border: 1px solid var(--line); border-radius: 7px; padding: 11px 16px; text-align: left; }
-  .how code { color: var(--dim); }
+  .installblock { margin: 30px auto 0; max-width: 360px; text-align: left; }
+  .installblock .newlabel { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint); margin-bottom: 9px; }
+  .installblock .cmd { display: flex; align-items: center; gap: 0.6em; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--dim); background: rgba(255,255,255,0.04); border: 1px solid var(--line); border-radius: 8px; padding: 11px 14px; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
+  .installblock .cmd .prompt { color: var(--faint); flex: 0 0 auto; }
+  .installblock .sub { font-family: var(--mono); font-size: 10.5px; line-height: 1.7; letter-spacing: 0.02em; color: var(--ghost); margin-top: 10px; }
+  .installblock .sub code { color: var(--faint); }
   #signinErr { margin-top: 16px; color: var(--danger); opacity: 0; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em; transition: opacity 240ms ease; min-height: 1em; }
   body.signin-error #signinErr { opacity: 0.95; }
   .signedas { margin-top: 20px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; color: var(--ghost); text-transform: uppercase; }
@@ -180,13 +184,18 @@
   .profile-tagline { color: var(--dim); margin-top: 12px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
   .profile-tagline.placeholder { color: var(--ghost); font-style: italic; }
 
-  .stats { display: flex; gap: 28px; padding: 18px 28px; border-bottom: 1px solid var(--line); }
-  .stat .v { font-family: var(--mono); font-size: 18px; color: var(--text); }
-  .stat .v .unit { font-size: 12px; color: var(--faint); margin-left: 2px; }
-  .stat .l { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint); margin-top: 4px; }
+  /* primary action: message another builder */
+  .profile-message { margin-top: 18px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.04em; color: var(--bg); background: var(--live); border: none; border-radius: 7px; padding: 9px 18px; font-weight: 600; cursor: pointer; }
+  .profile-message:hover { filter: brightness(1.07); }
+
+  .stats { display: flex; padding: 22px 28px; border-bottom: 1px solid var(--line); }
+  .stat { flex: 1; text-align: center; }
+  .stat .v { font-family: var(--mono); font-size: 22px; line-height: 1.1; color: var(--text); }
+  .stat .v .unit { font-size: 13px; color: var(--faint); margin-left: 1px; font-weight: 400; }
+  .stat .l { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint); margin-top: 7px; }
   .stat .v.accent { color: var(--live); }
 
-  .profile-section { padding: 20px 28px 24px; }
+  .profile-section { padding: 22px 28px 26px; }
   .profile-section .label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint); margin-bottom: 12px; }
   .project { padding: 10px 0; border-top: 1px solid var(--line); }
   .project:first-of-type { border-top: none; }
@@ -201,27 +210,34 @@
   .noprojects { font-family: var(--mono); font-size: 12px; color: var(--ghost); }
 
   /* editable bits (own profile) */
-  .edit-row { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-  .edit-row input, .edit-row textarea { background: var(--bg); border: 1px solid var(--ghost); border-radius: 6px; color: var(--text); font: inherit; padding: 8px 11px; outline: none; resize: vertical; }
-  .edit-row input:focus, .edit-row textarea:focus { border-color: var(--faint); }
-  .edit-row textarea { font-size: 13.5px; min-height: 38px; }
+  .field { background: rgba(255,255,255,0.04); border: 1px solid var(--line); border-radius: 8px; color: var(--text); font: inherit; padding: 10px 12px; outline: none; resize: vertical; transition: border-color 140ms ease, box-shadow 140ms ease; }
+  .field::placeholder { color: var(--faint); }
+  .field:focus { border-color: var(--live); box-shadow: 0 0 0 3px rgba(95,217,154,0.12); }
+  textarea.field { font-size: 13.5px; min-height: 40px; line-height: 1.5; }
+
+  .edit-row { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
   .editline { display: flex; gap: 8px; align-items: center; }
   .editline input { flex: 1; }
-  .saverow { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
-  .smallbtn { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bg); background: var(--live); border: none; border-radius: 6px; padding: 7px 13px; font-weight: 600; cursor: pointer; }
+  .saverow { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+  .smallbtn { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bg); background: var(--live); border: none; border-radius: 6px; padding: 8px 15px; font-weight: 600; cursor: pointer; }
   .smallbtn:hover { filter: brightness(1.07); }
-  .smallbtn.ghost { background: transparent; color: var(--dim); border: 1px solid var(--ghost); }
-  .smallbtn.ghost:hover { color: var(--text); filter: none; border-color: var(--faint); }
+  .smallbtn.ghost { background: transparent; color: var(--dim); border: none; padding: 8px 8px; }
+  .smallbtn.ghost:hover { color: var(--text); filter: none; }
   .charcap { font-family: var(--mono); font-size: 10px; color: var(--ghost); }
-  .edit-link { font-family: var(--mono); font-size: 11px; color: var(--faint); cursor: pointer; margin-top: 8px; display: inline-block; }
+  .edit-link { font-family: var(--mono); font-size: 11px; color: var(--faint); cursor: pointer; margin-top: 14px; display: inline-block; }
   .edit-link:hover { color: var(--live); }
-  .addproject-fields { display: none; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 14px; border-top: 1px dashed var(--line); }
+
+  /* crafted inline add-project composer */
+  .addproject-fields { display: none; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 16px; border-top: 1px solid var(--line); }
   .addproject-fields.open { display: flex; }
+  .addproject-fields .aprow { display: flex; gap: 10px; }
+  .addproject-fields .ap-name { flex: 1 1 auto; min-width: 0; }
+  .addproject-fields .ap-url  { flex: 0 0 40%; min-width: 0; }
 
   @media (max-width: 720px) {
     .body { grid-template-columns: 0 1fr; }
     aside { display: none; }
-    .roomhead, .stream, .compose, .hint { padding-left: 20px; padding-right: 20px; }
+    .roomhead, .stream, .compose { padding-left: 20px; padding-right: 20px; }
   }
   @media (prefers-reduced-motion: reduce) { .reconn .pip { animation: none; } }
 </style>
@@ -244,10 +260,9 @@
           <div id="roomList"></div>
         </div>
 
-        <div class="section">
+        <div class="section" id="dmSection" style="display:none">
           <div class="sechead"><span class="label">direct</span></div>
           <div id="dmList"></div>
-          <div class="empty-note" id="dmEmpty">click anyone below to start a chat</div>
         </div>
 
         <div class="section">
@@ -268,7 +283,6 @@
         </div>
 
         <div class="compose"><div class="col"><span class="caret">›</span><input id="say" maxlength="1000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="message…" /></div></div>
-        <div class="hint"><div class="col">you're live because your agent is working — you fade when it stops</div></div>
       </main>
     </div>
   </div>
@@ -277,7 +291,6 @@
   <div class="gate signin">
     <div class="gatecard">
       <div class="wordmark">back<b>·</b>channel</div>
-      <div class="gateglyph lit"><span class="core"></span></div>
       <h2>sign in</h2>
       <p>paste your token.</p>
       <div class="tokenbox">
@@ -286,7 +299,11 @@
         <button class="gatebtn" id="signinBtn" type="button">enter</button>
       </div>
       <div id="signinErr">&nbsp;</div>
-      <div class="how">no token? run the installer, then read it with<br><code>cat ~/.config/backchannel/token</code></div>
+      <div class="installblock">
+        <div class="newlabel">new here?</div>
+        <div class="cmd"><span class="prompt">$</span><span id="installCmd"></span></div>
+        <div class="sub">installs the agent + writes your token locally.</div>
+      </div>
     </div>
   </div>
 
@@ -294,7 +311,6 @@
   <div class="gate notpresent">
     <div class="gatecard">
       <div class="wordmark">back<b>·</b>channel</div>
-      <div class="gateglyph"><span class="core"></span></div>
       <h2>not in the channel</h2>
       <div class="signedas" id="notpresentWho">&nbsp;</div>
     </div>
@@ -323,7 +339,7 @@
   const nowCountEl     = document.getElementById("nowCount");
   const roomListEl    = document.getElementById("roomList");
   const dmListEl      = document.getElementById("dmList");
-  const dmEmptyEl     = document.getElementById("dmEmpty");
+  const dmSectionEl   = document.getElementById("dmSection");
   const rosterEl      = document.getElementById("roster");
   const rosterCountEl  = document.getElementById("rosterCount");
   const roomTitleEl   = document.getElementById("roomTitle");
@@ -418,16 +434,17 @@
     h = h % 12; if (h === 0) h = 12;
     return h + ":" + (m < 10 ? "0" + m : m) + ap;
   }
+  // build-time as a readable string: "0m" / "47m" / "2h 14m"
   function fmtBuildTime(secs) {
     secs = Math.max(0, Math.floor(secs || 0));
     const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
-    if (h >= 1) return { v: h, unit: "h" };
-    return { v: m, unit: "m" };
+    if (h >= 1) return m > 0 ? h + "h " + m + "m" : h + "h";
+    return m + "m";
   }
-  function streakMark(n) {
+  // streak is just a clean count; no glyph
+  function streakCount(n) {
     n = Math.max(0, Math.floor(n || 0));
-    if (n <= 0) return "";
-    return "△" + n;  // quiet ambient streak mark
+    return n;
   }
 
   // ---- Rooms (channels) + DMs in the rail ---------------------------------
@@ -453,7 +470,8 @@
 
   function renderDms() {
     dmListEl.innerHTML = "";
-    dmEmptyEl.style.display = dms.length ? "none" : "";
+    // DIRECT section only exists once DMs exist; hidden entirely otherwise
+    if (dmSectionEl) dmSectionEl.style.display = dms.length ? "" : "none";
     dms.forEach((r) => {
       const key = String(r.id);
       const div = document.createElement("div");
@@ -504,22 +522,18 @@
       const isYou = p.username === username;
       const div = document.createElement("div");
       div.className = "person" + (idleCls ? " idle" : "") + (isYou ? " you" : "");
-      const sm = streakMark(p.streak);
+      const sc = streakCount(p.streak);
       div.innerHTML =
         '<span class="dot ' + (idleCls ? "building" : "live") + '"></span>' +
         '<div class="who">' +
           '<div class="name">' +
-            '<span>@' + esc(p.username) + '</span>' +
-            (sm ? '<span class="streak">' + esc(sm) + '</span>' : '') +
+            '<span class="handle">@' + esc(p.username) + '</span>' +
+            (sc > 0 ? '<span class="streak">' + esc(String(sc)) + 'd</span>' : '') +
           '</div>' +
-          '<div class="doing">' + esc(p.tagline || "") + '</div>' +
+          (p.tagline ? '<div class="doing">' + esc(p.tagline) + '</div>' : '') +
         '</div>';
-      div.addEventListener("click", (e) => {
-        // shift/cmd click on someone -> open dm, otherwise open profile
-        openProfile(p.username);
-      });
-      // dedicated DM affordance: double-click opens a direct chat
-      div.addEventListener("dblclick", () => { if (!isYou) openDm([p.username]); });
+      // single click opens the person's profile (DMs start from the message button there)
+      div.addEventListener("click", () => openProfile(p.username));
       return div;
     }
 
@@ -547,9 +561,8 @@
           div.className = "person idle";
           div.innerHTML =
             '<span class="dot offline"></span>' +
-            '<div class="who"><div class="name"><span>@' + esc(u.username) + '</span></div></div>';
+            '<div class="who"><div class="name"><span class="handle">@' + esc(u.username) + '</span></div></div>';
           div.addEventListener("click", () => openProfile(u.username));
-          div.addEventListener("dblclick", () => openDm([u.username]));
           rosterEl.appendChild(div);
         });
         const link = document.createElement("div");
@@ -820,7 +833,7 @@
   function onProfileData(u) {
     if (!u) return;
     const isYou = u.username === username;
-    const bt = fmtBuildTime(u.buildSeconds);
+    const btStr = fmtBuildTime(u.buildSeconds);
     const sinceStr = u.since ? new Date(u.since).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
 
     let html =
@@ -831,21 +844,25 @@
         '<div id="taglineView" class="profile-tagline' + (u.tagline ? '' : ' placeholder') + '">' +
           (u.tagline ? esc(u.tagline) : (isYou ? 'add a tagline' : 'no tagline yet')) +
         '</div>' +
-        (isYou ? '<span class="edit-link" id="editTagline">edit tagline</span>' : '') +
+        (isYou
+          ? '<span class="edit-link" id="editTagline">edit tagline</span>'
+          : '<button class="profile-message" id="msgBtn">message</button>') +
       '</div>' +
       '<div class="stats">' +
-        '<div class="stat"><div class="v accent">' + esc(streakMark(u.streak) || "0") + '</div><div class="l">streak</div></div>' +
+        '<div class="stat"><div class="v accent">' + esc(String(streakCount(u.streak))) + '</div><div class="l">streak</div></div>' +
         '<div class="stat"><div class="v">' + esc(String(u.totalBuilds || 0)) + '</div><div class="l">builds</div></div>' +
-        '<div class="stat"><div class="v">' + esc(String(bt.v)) + '<span class="unit">' + bt.unit + '</span></div><div class="l">build-time</div></div>' +
+        '<div class="stat"><div class="v">' + esc(btStr) + '</div><div class="l">build-time</div></div>' +
       '</div>' +
       '<div class="profile-section">' +
         '<div class="label">projects</div>' +
         '<div id="projectsView"></div>' +
         (isYou ? '<span class="edit-link" id="addProjectLink">+ add project</span>' +
           '<div class="addproject-fields" id="addProjectFields">' +
-            '<input id="apName" maxlength="80" placeholder="project name" />' +
-            '<input id="apUrl" maxlength="200" placeholder="https:// (optional)" />' +
-            '<textarea id="apBlurb" maxlength="200" placeholder="short blurb (optional)"></textarea>' +
+            '<div class="aprow">' +
+              '<input class="field ap-name" id="apName" maxlength="80" placeholder="project name" autocomplete="off" />' +
+              '<input class="field ap-url" id="apUrl" maxlength="200" placeholder="https:// (optional)" autocomplete="off" />' +
+            '</div>' +
+            '<textarea class="field" id="apBlurb" maxlength="200" placeholder="short blurb (optional)"></textarea>' +
             '<div class="saverow"><button class="smallbtn" id="apSave">add</button>' +
             '<button class="smallbtn ghost" id="apCancel">cancel</button></div>' +
           '</div>' : '') +
@@ -854,6 +871,15 @@
     profileCard.innerHTML = html;
     bindProfileClose();
     renderProjects(u.projects || [], isYou);
+
+    if (!isYou) {
+      const msgBtn = document.getElementById("msgBtn");
+      if (msgBtn) msgBtn.addEventListener("click", () => {
+        const handle = u.username;
+        closeProfile();
+        openDm([handle]);  // server replies {room_opened}; we switch to the DM there
+      });
+    }
 
     if (isYou) {
       // keep our local `me` in sync
@@ -910,7 +936,7 @@
         const wrap = document.createElement("div");
         wrap.className = "edit-row";
         wrap.innerHTML =
-          '<textarea id="tagInput" maxlength="80" placeholder="what are you building?">' + esc(u.tagline || "") + '</textarea>' +
+          '<textarea class="field" id="tagInput" maxlength="80" placeholder="what are you building?">' + esc(u.tagline || "") + '</textarea>' +
           '<div class="saverow"><button class="smallbtn" id="tagSave">save</button>' +
           '<button class="smallbtn ghost" id="tagCancel">cancel</button>' +
           '<span class="charcap" id="tagCount"></span></div>';
@@ -930,24 +956,35 @@
       });
     }
 
+    const PROJECT_CAP = 6;
+    const projectCount = Array.isArray(u.projects) ? u.projects.length : 0;
     const addLink = document.getElementById("addProjectLink");
     const fields  = document.getElementById("addProjectFields");
     if (addLink && fields) {
-      addLink.addEventListener("click", () => {
-        fields.classList.toggle("open");
-        if (fields.classList.contains("open")) {
-          const n = document.getElementById("apName"); if (n) n.focus();
-        }
-      });
+      // respect the 6-project cap: hide the affordance once full
+      if (projectCount >= PROJECT_CAP) {
+        addLink.textContent = "project limit reached (6)";
+        addLink.style.cursor = "default";
+        addLink.style.color = "var(--ghost)";
+      } else {
+        addLink.addEventListener("click", () => {
+          fields.classList.toggle("open");
+          if (fields.classList.contains("open")) {
+            const n = document.getElementById("apName"); if (n) n.focus();
+          }
+        });
+      }
       const cancel = document.getElementById("apCancel");
       if (cancel) cancel.addEventListener("click", () => fields.classList.remove("open"));
       const save = document.getElementById("apSave");
       if (save) save.addEventListener("click", () => {
+        if (projectCount >= PROJECT_CAP) { fields.classList.remove("open"); return; }
         const name  = (document.getElementById("apName").value || "").trim().slice(0, 80);
         const url   = (document.getElementById("apUrl").value || "").trim().slice(0, 200);
         const blurb = (document.getElementById("apBlurb").value || "").trim().slice(0, 200);
         if (!name) { document.getElementById("apName").focus(); return; }
         send({ type: "add_project", name: name, url: url, blurb: blurb });
+        fields.classList.remove("open");
         setTimeout(() => send({ type: "profile", username: username }), 120);
       });
     }
@@ -1011,9 +1048,62 @@
     }
   });
 
+  // ---- Install command (sign-in page) -------------------------------------
+  // Built from location.origin so it always points at this deployment.
+  (() => {
+    const el = document.getElementById("installCmd");
+    if (el) el.textContent = "curl -fsSL " + location.origin + "/install.sh | sh";
+  })();
+
+  // ---- Pairing on load ----------------------------------------------------
+  // A short single-use code MAY arrive in the URL (?pair=CODE). We redeem it
+  // for the raw token, store the token locally, strip the query, and sign in.
+  // The long token is NEVER placed in a URL by us.
+  function redeemPairCode(code) {
+    return fetch("/pair/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: code }),
+    }).then((r) => (r.ok ? r.json() : null))
+      .then((d) => (d && typeof d.token === "string" && d.token ? d.token : null))
+      .catch(() => null);
+  }
+
+  function stripPairFromUrl() {
+    try {
+      const url = new URL(location.href);
+      url.searchParams.delete("pair");
+      history.replaceState(null, "", url.pathname + url.search + url.hash);
+    } catch (_) {}
+  }
+
   // ---- Boot ---------------------------------------------------------------
-  if (token) connect();
-  else showSignedOut();
+  function boot() {
+    let pairCode = "";
+    try { pairCode = (new URLSearchParams(location.search).get("pair") || "").trim(); } catch (_) {}
+
+    if (pairCode) {
+      // attempt automatic sign-in via the single-use code, then always strip it
+      redeemPairCode(pairCode).then((paired) => {
+        stripPairFromUrl();
+        if (paired) {
+          token = paired;
+          try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
+          reconnectDelay = 500;
+          connect();
+        } else if (token) {
+          connect();              // fall through to stored token
+        } else {
+          showSignedOut();        // fall through to normal paste sign-in
+        }
+      });
+      return;
+    }
+
+    if (token) connect();
+    else showSignedOut();
+  }
+  boot();
 })();
 </script>
 </body>

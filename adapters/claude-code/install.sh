@@ -134,6 +134,32 @@ json_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
+# Pull a top-level string field out of a small, flat JSON object. Good enough
+# for the tiny {"code":"..."} bodies the server returns — no jq dependency.
+json_field() {
+  # $1 = field name, stdin = JSON body
+  sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n1
+}
+
+# Open a URL in the default browser, non-blocking, using whatever's available
+# (macOS open, Linux xdg-open, WSL/Windows cmd.exe). Returns 0 if a launcher
+# was found and fired, 1 otherwise so the caller can fall back to printing.
+open_url() {
+  _u="$1"
+  if command -v open >/dev/null 2>&1; then
+    open "$_u" >/dev/null 2>&1 &
+    return 0
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$_u" >/dev/null 2>&1 &
+    return 0
+  elif command -v cmd.exe >/dev/null 2>&1; then
+    # WSL / Git-Bash: start needs an empty title arg; & is escaped for cmd.
+    cmd.exe /c start "" "$_u" >/dev/null 2>&1 &
+    return 0
+  fi
+  return 1
+}
+
 # --------------------------------------------------------------------------
 # Username claim loop
 # --------------------------------------------------------------------------
@@ -356,7 +382,30 @@ EOF
 fi
 
 # --------------------------------------------------------------------------
-# Done — print recovery phrase + sign-in instructions
+# Sign in — mint a single-use pairing code and open the browser straight in.
+# The short code (8 chars, 5-min TTL, one-time) is safe to carry in a URL; the
+# long token never is. If we can't mint a code or can't open a browser, we fall
+# back to printing the sign-in URL and the raw token to paste.
+# --------------------------------------------------------------------------
+PAIR_CODE=""
+_t="$(json_escape "$TOKEN")"
+_out="$(post_json "$SERVER/pair/new" "{\"token\":\"$_t\"}")"
+last_code
+if [ "$HTTP_CODE" = "200" ]; then
+  PAIR_CODE="$(printf '%s' "$_out" | json_field code)"
+fi
+
+OPENED=""
+PAIR_URL=""
+if [ -n "$PAIR_CODE" ]; then
+  PAIR_URL="$SERVER/?pair=$PAIR_CODE"
+  if open_url "$PAIR_URL"; then
+    OPENED="yes"
+  fi
+fi
+
+# --------------------------------------------------------------------------
+# Done — print recovery phrase + (only if needed) manual sign-in
 # --------------------------------------------------------------------------
 say ""
 say "  ------------------------------------------------------------"
@@ -376,18 +425,20 @@ say ""
 say "  (also written to $RECOVERY_FILE)"
 say "  ------------------------------------------------------------"
 say ""
-say "  sign in:"
-say "    1. open this in your browser:"
-say ""
-say "         $SERVER/"
-say ""
-say "    2. paste this token when asked (this is your only sign-in):"
-say ""
-say "         $TOKEN"
-say ""
-say "    3. leave the tab open — it lights up whenever your agent runs."
-say ""
-say "  (your token is also saved at $TOKEN_FILE — treat it like a password)"
+
+if [ -n "$OPENED" ]; then
+  say "  opening your browser — you'll land signed in."
+  say "  if it didn't pop up, open: $PAIR_URL"
+elif [ -n "$PAIR_URL" ]; then
+  say "  sign in — open this once (single-use, expires in 5 min):"
+  say ""
+  say "      $PAIR_URL"
+else
+  # Couldn't mint a pairing code — fall back to pasting the token.
+  say "  sign in — open $SERVER/ and paste this token:"
+  say ""
+  say "      $TOKEN"
+fi
 say ""
 say "  done. happy building."
 say ""
