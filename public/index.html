@@ -546,7 +546,7 @@
     // DIRECT section only exists once DMs exist; hidden entirely otherwise
     if (dmSectionEl) dmSectionEl.style.display = dms.length ? "" : "none";
     dms.forEach((r) => {
-      const key = String(r.id);
+      const key = roomKey(r);   // slug — must match what the server puts in msg.room
       const div = document.createElement("div");
       div.className = "row" + (key === currentRoom ? " sel" : "");
       // dm/group label: other members' handles
@@ -835,8 +835,8 @@
 
   function onRoomOpened(room) {
     if (!room) return;
-    const key = String(room.id);
-    if (!dms.some((d) => String(d.id) === key)) {
+    const key = roomKey(room);   // slug — consistent with channels + the server's msg.room
+    if (!dms.some((d) => roomKey(d) === key)) {
       dms.push(room);
       renderDms();
     }
