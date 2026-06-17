@@ -143,7 +143,11 @@
   body.notpresent .gate.notpresent { display: flex; }
 
   .gatecard { width: 100%; max-width: 460px; text-align: center; }
-  .gate .wordmark { justify-content: center; display: flex; margin-bottom: 30px; }
+  .gate .wordmark { justify-content: center; display: flex; margin-bottom: 18px; }
+  .gate.notpresent .gatecard { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .gate.notpresent .wordmark { margin-bottom: 6px; }
+  .gate.notpresent h2 { margin: 0; }
+  .gate.notpresent .signedas { margin-top: 2px; }
   .gateglyph {
     width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 24px;
     border: 1px solid var(--ghost); display: flex; align-items: center; justify-content: center;
@@ -247,7 +251,7 @@
   <!-- ============================== PRESENT: the full app ============================== -->
   <div class="app">
     <header>
-      <div class="wordmark">back<b>·</b>channel</div>
+      <div class="wordmark">backchannel</div>
       <div class="nowcount"><span class="n" id="nowCount">0</span> building now</div>
       <div class="reconn"><span class="pip"></span> reconnecting</div>
       <div class="me" id="meBtn"><span class="h" id="meName">&nbsp;</span><span class="dot live"></span></div>
@@ -290,7 +294,7 @@
   <!-- ============================== SIGNED-OUT ============================== -->
   <div class="gate signin">
     <div class="gatecard">
-      <div class="wordmark">back<b>·</b>channel</div>
+      <div class="wordmark">backchannel</div>
       <h2>sign in</h2>
       <p>paste your token.</p>
       <div class="tokenbox">
@@ -310,7 +314,7 @@
   <!-- ============================== NOT PRESENT (building / offline) ============================== -->
   <div class="gate notpresent">
     <div class="gatecard">
-      <div class="wordmark">back<b>·</b>channel</div>
+      <div class="wordmark">backchannel</div>
       <h2>not in the channel</h2>
       <div class="signedas" id="notpresentWho">&nbsp;</div>
     </div>
