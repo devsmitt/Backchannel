@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>backchannel</title>
+<style>
+  :root {
+    --bg:      #0a0b0d;
+    --rail:    #0c0d10;
+    --text:    #edeef0;
+    --dim:     #8b9198;
+    --faint:   #565b61;
+    --ghost:   #34383d;
+    --line:    rgba(255,255,255,0.06);
+    --hover:   rgba(255,255,255,0.03);
+    --sel:     rgba(255,255,255,0.05);
+    --live:    #5fd99a;      /* the ONE accent: live/active + you + unread */
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 15px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 26px; border-bottom: 1px solid var(--line);
+  }
+  .wordmark { font-family: var(--mono); font-size: 13px; letter-spacing: 0.34em; text-transform: uppercase; }
+  .wordmark b { color: var(--live); font-weight: 600; }
+  .nowcount { font-family: var(--mono); font-size: 12px; color: var(--dim); letter-spacing: 0.04em; }
+  .nowcount .n { color: var(--text); }
+  .me { display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
+  .me .h { color: var(--text); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+  .dot.live { background: var(--live); box-shadow: 0 0 0 3px rgba(95,217,154,0.14); }
+  .dot.building { background: var(--faint); }
+  .dot.offline { background: transparent; border: 1px solid var(--ghost); }
+
+  .body { display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
+
+  /* ---- left rail: rooms + direct + presence ---- */
+  aside { background: var(--rail); border-right: 1px solid var(--line); overflow-y: auto; padding: 20px 0 28px; }
+  .section { margin-bottom: 22px; }
+  .sechead { display:flex; justify-content:space-between; align-items:center; padding: 0 22px; margin-bottom: 8px; }
+  .sechead .label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--faint); }
+
+  .row { display: flex; align-items: center; gap: 10px; padding: 6px 22px; cursor: default; }
+  .row:hover { background: var(--hover); }
+  .row.sel { background: var(--sel); box-shadow: inset 2px 0 0 var(--live); }
+  .row .hash { font-family: var(--mono); color: var(--faint); font-size: 14px; }
+  .row .rname { flex: 1; min-width: 0; font-size: 14px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.sel .rname { color: var(--text); }
+  .row .badge { font-family: var(--mono); font-size: 11px; color: var(--bg); background: var(--live); border-radius: 9px; padding: 0 6px; min-width: 18px; text-align: center; }
+
+  /* presence roster */
+  .person { display: flex; gap: 11px; padding: 7px 22px; align-items: flex-start; }
+  .person:hover { background: var(--hover); }
+  .person .dot { margin-top: 6px; }
+  .person .who { min-width: 0; }
+  .person .name { font-size: 14px; }
+  .person.idle .name { color: var(--dim); }
+  .person.you .name { color: var(--live); }
+  .person .doing { font-size: 12.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .subhead { padding: 4px 22px 2px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ghost); }
+  .morelink { padding: 8px 22px 0; font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+
+  /* ---- conversation ---- */
+  main { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; }
+  .roomhead { padding: 15px 40px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 14px; }
+  .roomhead .rt { font-family: var(--mono); font-size: 14px; color: var(--text); }
+  .roomhead .topic { font-size: 13px; color: var(--faint); }
+
+  .stream { overflow-y: auto; padding: 22px 40px 12px; }
+  .col { max-width: 660px; }
+  .daydiv { display: flex; align-items: center; gap: 14px; margin: 6px 0 16px; color: var(--ghost); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; }
+  .daydiv::before, .daydiv::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+
+  .msg { padding: 8px 0 2px; }
+  .msg.cont { padding: 1px 0 2px; }
+  .msg .name { font-family: var(--mono); font-size: 12.5px; color: var(--dim); margin-bottom: 3px; }
+  .msg.self .name { color: var(--live); }
+  .msg .name .time { color: var(--ghost); font-size: 11px; margin-left: 9px; }
+  .msg .text { color: var(--text); }
+  .msg .text code { font-family: var(--mono); font-size: 13px; background: rgba(255,255,255,0.05); padding: 1px 5px; border-radius: 4px; color: #cdd2d6; }
+
+  .compose { border-top: 1px solid var(--line); padding: 15px 40px 6px; }
+  .compose .col { display: flex; align-items: center; gap: 12px; }
+  .compose .caret { color: var(--live); font-family: var(--mono); }
+  .compose input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font: inherit; }
+  .compose input::placeholder { color: var(--faint); }
+  .hint { padding: 6px 40px 16px; }
+  .hint .col { font-family: var(--mono); font-size: 11px; color: var(--ghost); letter-spacing: 0.03em; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="wordmark">back<b>·</b>channel</div>
+      <div class="nowcount"><span class="n">6</span> building now</div>
+      <div class="me"><span class="h">@devon</span><span class="dot live"></span></div>
+    </header>
+
+    <div class="body">
+      <aside>
+        <div class="section">
+          <div class="sechead"><span class="label">rooms</span></div>
+          <div class="row sel"><span class="hash">#</span><span class="rname">general</span></div>
+          <div class="row"><span class="hash">#</span><span class="rname">help</span></div>
+          <div class="row"><span class="hash">#</span><span class="rname">showcase</span><span class="badge">3</span></div>
+        </div>
+
+        <div class="section">
+          <div class="sechead"><span class="label">direct</span></div>
+          <div class="row"><span class="dot live"></span><span class="rname">marsh</span></div>
+          <div class="row"><span class="dot building"></span><span class="rname">renlow</span><span class="badge">2</span></div>
+          <div class="row"><span class="dot live"></span><span class="rname">kt_builds, nova</span></div>
+        </div>
+
+        <div class="section">
+          <div class="sechead"><span class="label">who's building</span><span class="label">6</span></div>
+          <div class="subhead">active · 4</div>
+          <div class="person you"><span class="dot live"></span><div class="who"><div class="name">@devon</div><div class="doing">a gated chat for builders</div></div></div>
+          <div class="person"><span class="dot live"></span><div class="who"><div class="name">@marsh</div><div class="doing">stripe webhooks, idempotency</div></div></div>
+          <div class="person"><span class="dot live"></span><div class="who"><div class="name">@renlow</div><div class="doing">ripping out hand-rolled auth</div></div></div>
+          <div class="person"><span class="dot live"></span><div class="who"><div class="name">@kt_builds</div><div class="doing">900-line component → hooks</div></div></div>
+          <div class="subhead">building · 5</div>
+          <div class="person idle"><span class="dot building"></span><div class="who"><div class="name">@sole</div><div class="doing">pricing page, dark mode</div></div></div>
+          <div class="person idle"><span class="dot building"></span><div class="who"><div class="name">@nova</div><div class="doing">migrating to sqlite</div></div></div>
+          <div class="person idle"><span class="dot building"></span><div class="who"><div class="name">@theo_b</div><div class="doing">chasing a timezone bug</div></div></div>
+          <div class="morelink">+2 more · 12 offline</div>
+        </div>
+      </aside>
+
+      <main>
+        <div class="roomhead"><span class="rt">#general</span><span class="topic">shop talk for whoever's mid-build</span></div>
+
+        <div class="stream">
+          <div class="col">
+            <div class="daydiv">earlier today</div>
+
+            <div class="msg"><div class="name">@marsh <span class="time">2:14</span></div><div class="text">just shipped the stripe webhook handler. hashed the event id + type into a unique column and let the db reject dupes on insert</div></div>
+
+            <div class="msg"><div class="name">@renlow <span class="time">2:16</span></div><div class="text">clean. i was about to build a whole <code>seen_events</code> table for that</div></div>
+
+            <div class="msg"><div class="name">@kt_builds <span class="time">2:19</span></div><div class="text">my agent is mid-refactor turning a 900-line component into hooks. just sitting here watching the diff scroll by like a campfire</div></div>
+
+            <div class="msg self"><div class="name">@devon <span class="time">2:21</span></div><div class="text">that's the exact reason i'm building this. the wait between prompts is dead time — might as well spend it with people who get it</div></div>
+
+            <div class="msg"><div class="name">@nova <span class="time">2:29</span></div><div class="text">anyone moved a prod sqlite db onto a volume without downtime?</div></div>
+            <div class="msg cont"><div class="text">about to try it live and my palms are sweating</div></div>
+
+            <div class="msg"><div class="name">@theo_b <span class="time">2:31</span></div><div class="text">@nova snapshot first, then it's just a file copy. you'll be fine</div></div>
+          </div>
+        </div>
+
+        <div class="compose"><div class="col"><span class="caret">›</span><input placeholder="message #general…" /></div></div>
+        <div class="hint"><div class="col">you're live because your agent is working — you fade when it stops</div></div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
