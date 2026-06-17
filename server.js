@@ -89,6 +89,63 @@ function recoverBlocked(username) {
 }
 
 // ---------------------------------------------------------------------------
+// Rate limiting — small reusable in-memory token-bucket limiters.
+//
+// Each limiter refills `capacity` tokens over `windowMs` and spends 1 per hit.
+// `allow(key)` returns true if the request may proceed, false if it's over the
+// limit. Buckets are kept in a Map keyed by IP / token-hash / userId; a periodic
+// sweep evicts idle buckets so the Map can't grow unbounded under churn.
+//
+// These are deliberately generous: tuned so normal interactive use NEVER trips
+// them, while a runaway script or abusive peer is capped. All limits are
+// per-process (fine for a single Railway instance); they reset on restart.
+// ---------------------------------------------------------------------------
+
+function makeLimiter({ capacity, windowMs }) {
+  const buckets = new Map(); // key -> { tokens, last }
+  const refillPerMs = capacity / windowMs;
+  function allow(key) {
+    const now = Date.now();
+    let b = buckets.get(key);
+    if (!b) { b = { tokens: capacity, last: now }; buckets.set(key, b); }
+    // Refill proportionally to elapsed time, capped at capacity.
+    b.tokens = Math.min(capacity, b.tokens + (now - b.last) * refillPerMs);
+    b.last = now;
+    if (b.tokens < 1) return false;
+    b.tokens -= 1;
+    return true;
+  }
+  // Drop buckets that have fully refilled and gone idle (nothing to remember).
+  function sweep(now = Date.now()) {
+    for (const [key, b] of buckets) {
+      if (now - b.last > windowMs && b.tokens >= capacity) buckets.delete(key);
+    }
+  }
+  return { allow, sweep };
+}
+
+// Limiter instances (tuned per the security contract).
+const limitClaim     = makeLimiter({ capacity: 5,   windowMs: 60 * 1000 });        // /claim per IP: 5/min
+const limitPairNew   = makeLimiter({ capacity: 10,  windowMs: 60 * 1000 });        // /pair/new per token-hash: 10/min
+const limitPairRedeem= makeLimiter({ capacity: 30,  windowMs: 60 * 1000 });        // /pair/redeem per IP: 30/min (guess guard)
+const limitPresence  = makeLimiter({ capacity: 120, windowMs: 60 * 1000 });        // /enter + /exit per token-hash combined: 120/min
+const limitRotate    = makeLimiter({ capacity: 5,   windowMs: 60 * 1000 });        // /rotate per token-hash: 5/min
+const limitSay       = makeLimiter({ capacity: 20,  windowMs: 10 * 1000 });        // WS 'say' per userId: 20 / 10s
+
+const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitRotate, limitSay];
+
+// Extract the client IP. Behind Railway's proxy the real client is the FIRST
+// hop in X-Forwarded-For; fall back to the socket address when no proxy header.
+function clientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length) {
+    const first = xff.split(',')[0].trim();
+    if (first) return first;
+  }
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+
+// ---------------------------------------------------------------------------
 // In-memory presence, tracked PER USER (a user may have several sockets/tabs).
 //
 // presence: userId -> { present: bool, enterAt: number|null, timer: Timeout|null }
@@ -274,10 +331,18 @@ function forceExit(userId) {
 // fire-and-forget and must not stall the user's real workflow.
 // ---------------------------------------------------------------------------
 
+// CORS posture is INTENTIONAL and safe for this design: auth is a bearer token
+// carried in the JSON body (never a cookie or Authorization header the browser
+// attaches automatically), and we never set Access-Control-Allow-Credentials.
+// A malicious page therefore cannot ride an existing session — it would have to
+// already possess the victim's secret token, in which case CORS is moot. We keep
+// '*' so the installer's pairing fetch and any future first-party origin work
+// without an allowlist to maintain.
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Max-Age': '600',
 };
 
 const MIME = {
@@ -290,20 +355,45 @@ const MIME = {
   '.svg': 'image/svg+xml',
 };
 
-// Read a JSON POST body with a sane cap. Malformed / oversized -> null.
+// Read a JSON POST body with a sane cap. Every endpoint here carries only tiny
+// JSON ({token}, {username,token,recovery}, {code}), so an 8KB ceiling is far
+// more than enough and rejects oversized payloads early. The resolved value
+// distinguishes the failure modes so callers can answer 413 vs 400:
+//   { ok:true,  body }            on a parsed object
+//   { ok:false, tooBig:true }     on oversized payload (-> 413)
+//   { ok:false }                  on malformed / non-object JSON (-> 400)
+const MAX_REQUEST_BYTES = 8 * 1024;
 function readJsonBody(req) {
   return new Promise((resolve) => {
-    let raw = '';
-    let tooBig = false;
+    let size = 0;
+    const chunks = [];
+    let settled = false;
+    const finish = (v) => { if (!settled) { settled = true; resolve(v); } };
     req.on('data', (chunk) => {
-      raw += chunk;
-      if (raw.length > 64 * 1024) { tooBig = true; req.destroy(); }
+      if (settled) return;
+      size += chunk.length;
+      if (size > MAX_REQUEST_BYTES) {
+        // Stop buffering and resolve as oversized. We do NOT destroy the socket:
+        // the caller still wants to send a clean 413, and we drain the rest so
+        // the connection can be reused. The drain is bounded by Node's own
+        // header/timeout limits.
+        chunks.length = 0;
+        req.on('data', () => {});
+        finish({ ok: false, tooBig: true });
+        return;
+      }
+      chunks.push(chunk);
     });
     req.on('end', () => {
-      if (tooBig) return resolve(null);
-      try { resolve(JSON.parse(raw || '{}')); } catch { resolve(null); }
+      if (settled) return;
+      let parsed;
+      try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
+      catch { return finish({ ok: false }); }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return finish({ ok: false });
+      finish({ ok: true, body: parsed });
     });
-    req.on('error', () => resolve(null));
+    req.on('error', () => finish({ ok: false }));
+    req.on('aborted', () => finish({ ok: false }));
   });
 }
 
@@ -354,7 +444,10 @@ const server = http.createServer(async (req, res) => {
 
   // --- Claim a username --------------------------------------------------
   if (method === 'POST' && urlPath === '/claim') {
-    const body = await readJsonBody(req);
+    if (!limitClaim.allow(clientIp(req))) { sendJson(res, 429, { error: 'rate limited' }); return; }
+    const parsed = await readJsonBody(req);
+    if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
+    const body = parsed.body;
     const username = normalizeUsername(body && body.username);
     const token = body && typeof body.token === 'string' ? body.token : '';
     const recovery = body && typeof body.recovery === 'string' ? body.recovery : '';
@@ -373,7 +466,9 @@ const server = http.createServer(async (req, res) => {
 
   // --- Recover an identity onto a new token ------------------------------
   if (method === 'POST' && urlPath === '/recover') {
-    const body = await readJsonBody(req);
+    const parsed = await readJsonBody(req);
+    if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
+    const body = parsed.body;
     const username = normalizeUsername(body && body.username);
     const recovery = body && typeof body.recovery === 'string' ? body.recovery : '';
     const newToken = body && typeof body.newToken === 'string' ? body.newToken : '';
@@ -392,16 +487,64 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- Rotate a token (kill a leaked token without losing identity) ------
+  // {token} -> if it resolves to a user, mint a NEW secret token, swap the
+  // stored token_hash, and return 200 {token:<new>}. The OLD token stops
+  // working immediately (its hash no longer matches any row). This is distinct
+  // from /recover: rotation needs the CURRENT token (not the recovery phrase)
+  // and keeps the same identity — it just retires a secret that may have leaked.
+  // Unknown token -> 401 with the same shape; never reveals whether a token
+  // exists beyond the auth result the caller already holds.
+  if (method === 'POST' && urlPath === '/rotate') {
+    const parsed = await readJsonBody(req);
+    if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
+    const body = parsed.body;
+    const token = body && typeof body.token === 'string' ? body.token.trim() : '';
+    if (!token) { sendJson(res, 400, { error: 'bad request' }); return; }
+    const oldHash = sha256(token);
+    // Rate-limit per token-hash so a stolen token can't be used to churn
+    // rotations; an IP fallback caps garbage-token floods on this path too.
+    if (!limitRotate.allow(oldHash) || !limitRotate.allow('ip:' + clientIp(req))) {
+      sendJson(res, 429, { error: 'rate limited' }); return;
+    }
+    const user = userByTokenHash(oldHash);
+    if (!user) { sendJson(res, 401, { error: 'unauthorized' }); return; }
+    // Mint a fresh 64-hex secret; retry on the astronomically unlikely
+    // hash collision with an existing row.
+    let attempts = 0;
+    while (attempts++ < 5) {
+      const next = crypto.randomBytes(32).toString('hex');
+      try {
+        updateToken(user.id, sha256(next));
+        sendJson(res, 200, { token: next });
+        return;
+      } catch {
+        // UNIQUE collision on token_hash — try a different secret.
+      }
+    }
+    sendJson(res, 500, { error: 'rotate failed' });
+    return;
+  }
+
   // --- Pairing: mint a single-use code from a (long) token --------------
   // {token} -> resolve to a user; mint an 8-char url-safe, 5-min, single-use
   // code bound to that user. Returns 200 {code}. Unknown token -> 400.
   // The long token is consumed here and stored only in memory; it never leaves
   // in a URL — only the short code does.
   if (method === 'POST' && urlPath === '/pair/new') {
-    const body = await readJsonBody(req);
+    const parsed = await readJsonBody(req);
+    if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
+    const body = parsed.body;
     const token = body && typeof body.token === 'string' ? body.token.trim() : '';
     if (!token) { sendJson(res, 400, { error: 'bad request' }); return; }
-    const user = userByTokenHash(sha256(token));
+    // Limit per token-hash (never key on the raw secret). An IP fallback also
+    // caps callers that send no/garbage tokens, so unknown tokens can't be used
+    // to flood the lookup path.
+    const tokenHash = sha256(token);
+    if (!limitPairNew.allow(tokenHash) || !limitPairNew.allow('ip:' + clientIp(req))) {
+      sendJson(res, 429, { error: 'rate limited' }); return;
+    }
+    const user = userByTokenHash(tokenHash);
     if (!user) { sendJson(res, 400, { error: 'bad request' }); return; }
 
     sweepPairings();
@@ -423,7 +566,10 @@ const server = http.createServer(async (req, res) => {
   // Invalid / expired / already-used -> 404 {error}. The browser stores the
   // returned token locally for subsequent auth.
   if (method === 'POST' && urlPath === '/pair/redeem') {
-    const body = await readJsonBody(req);
+    if (!limitPairRedeem.allow(clientIp(req))) { sendJson(res, 429, { error: 'rate limited' }); return; }
+    const parsed = await readJsonBody(req);
+    if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
+    const body = parsed.body;
     const code = body && typeof body.code === 'string' ? body.code.trim() : '';
     const rec = code ? pairings.get(code) : null;
 
@@ -444,26 +590,45 @@ const server = http.createServer(async (req, res) => {
   // {token} -> mark present, start camping timer, bump status, broadcast roster.
   // Unknown token -> still 200 (no existence leak). Always 200, fast.
   if (method === 'POST' && urlPath === '/enter') {
-    const body = await readJsonBody(req);
+    const parsed = await readJsonBody(req);
+    if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
+    const body = parsed.body;
     const token = body && typeof body.token === 'string' ? body.token.trim() : '';
+    // Presence is fire-and-forget: 200 fast, no existence leak. Rate-limit per
+    // token-hash (combined with /exit) so a hook misfire loop can't hammer us;
+    // unknown/empty tokens never reach the limiter or the DB lookup.
+    if (token) {
+      const tokenHash = sha256(token);
+      if (!limitPresence.allow(tokenHash)) { sendJson(res, 429, { error: 'rate limited' }); return; }
+      sendJson(res, 200, { ok: true });
+      setImmediate(() => {
+        const user = userByTokenHash(tokenHash);
+        if (user) enterUser(user.id);
+      });
+      return;
+    }
     sendJson(res, 200, { ok: true });
-    if (token) setImmediate(() => {
-      const user = userByTokenHash(sha256(token));
-      if (user) enterUser(user.id);
-    });
     return;
   }
 
   // --- Presence exit (Stop hook) -----------------------------------------
   // {token} -> mark building, add build_seconds, broadcast roster. Always 200.
   if (method === 'POST' && urlPath === '/exit') {
-    const body = await readJsonBody(req);
+    const parsed = await readJsonBody(req);
+    if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
+    const body = parsed.body;
     const token = body && typeof body.token === 'string' ? body.token.trim() : '';
+    if (token) {
+      const tokenHash = sha256(token);
+      if (!limitPresence.allow(tokenHash)) { sendJson(res, 429, { error: 'rate limited' }); return; }
+      sendJson(res, 200, { ok: true });
+      setImmediate(() => {
+        const user = userByTokenHash(tokenHash);
+        if (user) exitUser(user.id);
+      });
+      return;
+    }
     sendJson(res, 200, { ok: true });
-    if (token) setImmediate(() => {
-      const user = userByTokenHash(sha256(token));
-      if (user) exitUser(user.id);
-    });
     return;
   }
 
@@ -497,7 +662,10 @@ const server = http.createServer(async (req, res) => {
 // state. Subscriptions are per-socket per-room (by room id, resolved server-side).
 // ---------------------------------------------------------------------------
 
-const wss = new WebSocketServer({ server, path: '/ws' });
+// maxPayload caps a single inbound WS frame (16KB is generous: our largest
+// legit message is a 1000-char 'say' plus small fields). Oversized frames are
+// rejected by ws before they reach our handler, bounding per-socket memory.
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
 // Caps mirrored from db.js for input rejection messages.
 const TAGLINE_MAX = CAPS.tagline;
@@ -613,6 +781,9 @@ wss.on('connection', (ws) => {
     // --- say: PRESENCE GATE -> access gate -> persist -> broadcast --------
     if (msg.type === 'say') {
       if (!ws.userId) return;
+      // Per-user flood cap (20 / 10s). Generous for a human typing; stops a
+      // scripted socket from spamming every room. Silently dropped when over.
+      if (!limitSay.allow(ws.userId)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
       // The gate: only a user whose agent is currently building may speak.
       if (!isPresent(ws.userId)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
 
@@ -755,6 +926,9 @@ const sweep = setInterval(() => {
   } catch (e) { console.error('[backchannel] prune:', e); }
 
   try { sweepPairings(); } catch (e) { console.error('[backchannel] pair sweep:', e); }
+
+  // Evict idle rate-limit buckets so the limiter Maps can't grow unbounded.
+  try { for (const lim of allLimiters) lim.sweep(); } catch (e) { console.error('[backchannel] limiter sweep:', e); }
 
   try {
     const roster = buildRoster();

@@ -230,6 +230,9 @@
   .charcap { font-family: var(--mono); font-size: 10px; color: var(--ghost); }
   .edit-link { font-family: var(--mono); font-size: 11px; color: var(--faint); cursor: pointer; margin-top: 14px; display: inline-block; }
   .edit-link:hover { color: var(--live); }
+  .rotate-link { margin-left: 16px; }
+  .rotate-link:hover { color: var(--danger); }
+  .rotate-link.busy { color: var(--ghost); cursor: default; }
 
   /* crafted inline add-project composer */
   .addproject-fields { display: none; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 16px; border-top: 1px solid var(--line); }
@@ -849,7 +852,8 @@
           (u.tagline ? esc(u.tagline) : (isYou ? 'add a tagline' : 'no tagline yet')) +
         '</div>' +
         (isYou
-          ? '<span class="edit-link" id="editTagline">edit tagline</span>'
+          ? '<span class="edit-link" id="editTagline">edit tagline</span>' +
+            '<span class="edit-link rotate-link" id="rotateToken">rotate token</span>'
           : '<button class="profile-message" id="msgBtn">message</button>') +
       '</div>' +
       '<div class="stats">' +
@@ -957,6 +961,55 @@
         document.getElementById("tagCancel").addEventListener("click", () => {
           send({ type: "profile", username: username });
         });
+      });
+    }
+
+    // ---- Rotate token: kill a leaked token without losing identity ----
+    // Confirms, POSTs the CURRENT token to /rotate, swaps in the new token, and
+    // keeps the live session working (no logout). The old token dies server-side
+    // the instant the swap lands. Distinct from recovery (which needs the phrase).
+    const rotateLink = document.getElementById("rotateToken");
+    if (rotateLink) {
+      rotateLink.addEventListener("click", () => {
+        if (rotateLink.classList.contains("busy")) return;
+        if (!token) return;
+        const ok = window.confirm(
+          "Rotate your token?\n\n" +
+          "Your CURRENT token stops working immediately on every device. " +
+          "This browser stays signed in with a fresh token. Use this if your " +
+          "token may have leaked.\n\n" +
+          "Note: your local agent hook still uses the old token — re-run the " +
+          "installer to re-wire it."
+        );
+        if (!ok) return;
+        rotateLink.classList.add("busy");
+        rotateLink.textContent = "rotating…";
+        fetch("/rotate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: token }),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => {
+            if (d && typeof d.token === "string" && d.token) {
+              // Swap the secret in place; the open socket is already authed, so
+              // the session keeps working with no reconnect needed.
+              token = d.token;
+              try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
+              rotateLink.classList.remove("busy");
+              rotateLink.textContent = "token rotated ✓";
+              setTimeout(() => { rotateLink.textContent = "rotate token"; }, 2600);
+            } else {
+              rotateLink.classList.remove("busy");
+              rotateLink.textContent = "rotate failed — retry";
+              setTimeout(() => { rotateLink.textContent = "rotate token"; }, 2600);
+            }
+          })
+          .catch(() => {
+            rotateLink.classList.remove("busy");
+            rotateLink.textContent = "rotate failed — retry";
+            setTimeout(() => { rotateLink.textContent = "rotate token"; }, 2600);
+          });
       });
     }
 

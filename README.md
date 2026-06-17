@@ -93,9 +93,21 @@ Messages are **pruned after `RETENTION_MS`** (default 6h) — both at startup an
 
 ---
 
+## Works with your tools
+
+Presence is gated the same way no matter how you build — one install covers all of them:
+
+- **Claude Code** — **native hooks** (precise). `UserPromptSubmit` → `/enter`, `Stop` → `/exit`, wired straight into `~/.claude/settings.json`. The gate opens exactly when a prompt starts and closes exactly when it stops.
+- **Other CLI agents + raw terminal** — **shell integration** (one install). A sourced snippet (`adapters/shell/backchannel.sh`) watches your shell and fires the same `/enter`/`/exit` pings when you run another agent (`codex`, `aider`, `gemini`, `llm`, `goose`, `opencode` — configurable via `BACKCHANNEL_AGENTS`; `claude` is deliberately excluded since it has the native hooks above). Optionally set `BACKCHANNEL_WATCH_ALL=1` to also light up for any command running longer than `BACKCHANNEL_WATCH_SECONDS` (default 30). Works in **zsh** and **bash**; every ping is a backgrounded `curl --max-time 2`, so your prompt never blocks.
+- **Cursor** — see [`adapters/cursor/`](adapters/cursor/) for editor-status integration.
+
+Every integration sends **only your token** (read from `~/.config/backchannel/token`); the server resolves your username from its hash. Nothing else — no username, never a URL.
+
+---
+
 ## Quickstart
 
-One command. It claims a username, wires the enter/exit hooks into Claude Code, then **opens your browser already signed in** — no token to copy or paste.
+One command. It claims a username, wires the enter/exit hooks into Claude Code, installs the shell integration for other CLI agents, then **opens your browser already signed in** — no token to copy or paste.
 
 ```sh
 curl -fsSL https://backchannel.example/install.sh | sh
@@ -106,7 +118,8 @@ The installer will:
 1. **Ask for a username** — 2–24 chars, `[a-z0-9_-]`, lowercased. Reprompts if it's taken.
 2. **Generate a secret token** and a **recovery phrase** (random words). It prints the recovery phrase once — **save it**, it's the only way to get your username back if you lose the token.
 3. **Wire two hooks** into `~/.claude/settings.json` (backed up first, merged without clobbering): `UserPromptSubmit` → enter, `Stop` → exit. **Each hook sends only your token** — nothing else.
-4. **Open the web client signed in.** It mints a one-time pairing code (8 chars, 5-min TTL) and opens `…/?pair=<code>`; the browser redeems it for your token, stores it in `localStorage` (`backchannel-token`), and strips the code from the URL. Your long token **never travels in a URL**.
+4. **Install the shell integration** for non-Claude CLI agents and raw terminal: it writes the server origin to `~/.config/backchannel/server`, drops `backchannel.sh` into `~/.config/backchannel/`, and adds a single guarded `source` line to your `~/.zshrc` or `~/.bashrc` (idempotent — re-runs never duplicate it). See [Works with your tools](#works-with-your-tools).
+5. **Open the web client signed in.** It mints a one-time pairing code (8 chars, 5-min TTL) and opens `…/?pair=<code>`; the browser redeems it for your token, stores it in `localStorage` (`backchannel-token`), and strips the code from the URL. Your long token **never travels in a URL**.
 
 If no browser launcher is found (or the network call fails), the installer falls back to printing the sign-in URL and your token to paste manually. Your token always lives at `~/.config/backchannel/token` too.
 

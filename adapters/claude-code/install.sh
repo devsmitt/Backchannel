@@ -22,6 +22,8 @@ SERVER="${SERVER%/}"
 CONFIG_DIR="$HOME/.config/backchannel"
 TOKEN_FILE="$CONFIG_DIR/token"
 RECOVERY_FILE="$CONFIG_DIR/recovery"
+SERVER_FILE="$CONFIG_DIR/server"
+SHELL_SNIPPET="$CONFIG_DIR/backchannel.sh"
 SETTINGS_DIR="$HOME/.claude"
 SETTINGS_FILE="$SETTINGS_DIR/settings.json"
 
@@ -382,6 +384,248 @@ EOF
 fi
 
 # --------------------------------------------------------------------------
+# Shell integration — gate presence for NON-Claude CLI agents + raw terminal.
+#
+# Claude Code uses the precise native hooks wired above. This step is ADDITIVE:
+# it installs a sourced shell snippet that watches for other CLI coding agents
+# (codex, aider, gemini, ...) and fires the same /enter|/exit {token} pings.
+#   1. write the SERVER origin to ~/.config/backchannel/server (the snippet
+#      reads it at runtime — token + server both live under the config dir).
+#   2. write the snippet itself to ~/.config/backchannel/backchannel.sh.
+#   3. detect the user's login shell and idempotently add ONE guarded
+#      'source ~/.config/backchannel/backchannel.sh' line to the right rc file.
+# --------------------------------------------------------------------------
+
+# (1) Persist the server origin for the snippet to read. Not secret, but keep
+# the tidy 600 from the umask above; the snippet only needs to read it.
+printf '%s' "$SERVER" > "$SERVER_FILE"
+
+# (2) Write the shell snippet. Quoted heredoc ('SHELLEOF') so NOTHING inside is
+# expanded by this installer — the snippet ships verbatim, exactly as authored.
+cat > "$SHELL_SNIPPET" <<'SHELLEOF'
+# backchannel.sh — tool-agnostic shell presence integration
+# ----------------------------------------------------------------------------
+# Sourced from your ~/.zshrc or ~/.bashrc by the Backchannel installer:
+#     source ~/.config/backchannel/backchannel.sh
+#
+# Backchannel only lets you be PRESENT while your agent is working. Claude Code
+# has precise native hooks (UserPromptSubmit -> /enter, Stop -> /exit) and does
+# NOT need this. This snippet covers EVERYTHING ELSE: other CLI coding agents
+# (codex, aider, gemini, llm, goose, opencode, ...) and — optionally — any
+# long-running terminal command, so your dead-time gates presence too.
+#
+# When you run a command whose program matches the agent list, we POST /enter
+# {token} as it starts and POST /exit {token} when it finishes. The curl calls
+# are backgrounded and capped at 2s, so your prompt NEVER blocks or hangs.
+#
+# SAFETY: sends ONLY the token (~/.config/backchannel/token), never a URL or
+# username. Silent + non-fatal if curl/token/server are missing. Idempotent.
+#
+# CONFIG (env vars, set before sourcing):
+#   BACKCHANNEL_AGENTS        space-separated programs that gate presence.
+#                             Default: "codex aider gemini llm goose opencode".
+#                             DELIBERATELY excludes "claude" (native hooks).
+#   BACKCHANNEL_WATCH_ALL     "1" to also gate ANY command running longer than
+#                             BACKCHANNEL_WATCH_SECONDS. Default: off.
+#   BACKCHANNEL_WATCH_SECONDS threshold seconds for WATCH_ALL. Default: 30.
+#   BACKCHANNEL_CONFIG_DIR    config dir. Default: ~/.config/backchannel.
+# ----------------------------------------------------------------------------
+
+# Only meaningful in an interactive shell; otherwise a harmless no-op.
+case "$-" in
+  *i*) ;;
+  *)   return 0 2>/dev/null || true ;;
+esac
+
+# --- Configuration ----------------------------------------------------------
+: "${BACKCHANNEL_CONFIG_DIR:=$HOME/.config/backchannel}"
+: "${BACKCHANNEL_AGENTS:=codex aider gemini llm goose opencode}"
+: "${BACKCHANNEL_WATCH_ALL:=0}"
+: "${BACKCHANNEL_WATCH_SECONDS:=30}"
+
+_BACKCHANNEL_TOKEN_FILE="$BACKCHANNEL_CONFIG_DIR/token"
+_BACKCHANNEL_SERVER_FILE="$BACKCHANNEL_CONFIG_DIR/server"
+
+# Read the server origin (written by the installer). Returns nonzero if missing.
+_backchannel_server() {
+  [ -r "$_BACKCHANNEL_SERVER_FILE" ] || return 1
+  _bc_s=$(head -n1 "$_BACKCHANNEL_SERVER_FILE" 2>/dev/null)
+  _bc_s=${_bc_s%/}
+  [ -n "$_bc_s" ] || return 1
+  printf '%s' "$_bc_s"
+}
+
+# Fire a presence ping at /enter or /exit. $1 is "enter" or "exit".
+# Sends ONLY the token, backgrounded + --max-time 2, all output discarded.
+# Any missing prerequisite (curl, token, server) makes this a silent no-op.
+_backchannel_ping() {
+  command -v curl >/dev/null 2>&1 || return 0
+  [ -r "$_BACKCHANNEL_TOKEN_FILE" ] || return 0
+
+  _bc_server=$(_backchannel_server) || return 0
+  _bc_token=$(head -n1 "$_BACKCHANNEL_TOKEN_FILE" 2>/dev/null)
+  [ -n "$_bc_token" ] || return 0
+
+  # Backgrounded in a subshell so the "[1] Done" job notice never leaks to the
+  # terminal, and a hung server can never stall the prompt.
+  ( curl -sS --max-time 2 \
+      -H 'Content-Type: application/json' \
+      -X POST "$_bc_server/$1" \
+      -d "{\"token\":\"$_bc_token\"}" \
+      >/dev/null 2>&1 & ) >/dev/null 2>&1
+}
+
+# Decide whether an about-to-run command line gates presence ($1 = command line).
+# On a match: set _BACKCHANNEL_ACTIVE=1 and fire /enter. In WATCH_ALL mode a
+# non-agent command is recorded as a candidate (duration judged at completion).
+_backchannel_should_track() {
+  _bc_cmdline="$1"
+  [ -n "$_bc_cmdline" ] || return 0
+
+  # Program name via parameter expansion + case ONLY (no word splitting): zsh
+  # does not field-split unquoted "$var", so for-in-$var would see one token.
+  # This idiom behaves identically in sh, bash, and zsh.
+  # Peel leading VAR=value env-assignments, then take the first token, basename.
+  _bc_rest="$_bc_cmdline"
+  while : ; do
+    _bc_rest="${_bc_rest#"${_bc_rest%%[![:space:]]*}"}"   # ltrim
+    _bc_head="${_bc_rest%%[[:space:]]*}"                   # first token
+    case "$_bc_head" in
+      ?*=*) _bc_rest="${_bc_rest#"$_bc_head"}" ;;          # assignment -> drop
+      *)    break ;;
+    esac
+  done
+  _bc_prog="${_bc_rest%%[[:space:]]*}"
+  _bc_prog="${_bc_prog##*/}"
+  [ -n "$_bc_prog" ] || return 0
+
+  # Match the agent list with a space-padded glob (no word-splitting needed).
+  case " $BACKCHANNEL_AGENTS " in
+    *" $_bc_prog "*)
+      _BACKCHANNEL_ACTIVE=1
+      _backchannel_ping enter
+      return 0
+      ;;
+  esac
+
+  if [ "$BACKCHANNEL_WATCH_ALL" = "1" ]; then
+    _BACKCHANNEL_WATCH_CANDIDATE=1
+    _BACKCHANNEL_WATCH_START=$(date +%s 2>/dev/null || printf '0')
+  fi
+  return 0
+}
+
+# Called after a command completes (precmd / PROMPT_COMMAND). Closes out an
+# agent /enter with /exit, or — in WATCH_ALL — credits long dead-time after the
+# fact with a paired enter+exit (duration is only knowable once it's finished).
+_backchannel_post() {
+  if [ "${_BACKCHANNEL_ACTIVE:-0}" = "1" ]; then
+    _BACKCHANNEL_ACTIVE=0
+    _backchannel_ping exit
+  fi
+
+  if [ "${_BACKCHANNEL_WATCH_CANDIDATE:-0}" = "1" ]; then
+    _BACKCHANNEL_WATCH_CANDIDATE=0
+    _bc_now=$(date +%s 2>/dev/null || printf '0')
+    _bc_start=${_BACKCHANNEL_WATCH_START:-0}
+    _BACKCHANNEL_WATCH_START=0
+    if [ "$_bc_now" -gt 0 ] && [ "$_bc_start" -gt 0 ]; then
+      _bc_dur=$(( _bc_now - _bc_start ))
+      if [ "$_bc_dur" -ge "$BACKCHANNEL_WATCH_SECONDS" ]; then
+        _backchannel_ping enter
+        _backchannel_ping exit
+      fi
+    fi
+  fi
+}
+
+# ----------------------------------------------------------------------------
+# Shell-specific wiring. Detect zsh vs bash; bind hooks idempotently.
+# ----------------------------------------------------------------------------
+if [ -n "${ZSH_VERSION:-}" ]; then
+  # zsh: preexec (before a command, receives the line as $1) + precmd (after).
+  _backchannel_preexec() { _backchannel_should_track "$1"; }
+  _backchannel_precmd()  { _backchannel_post; }
+
+  autoload -Uz add-zsh-hook 2>/dev/null
+  if whence add-zsh-hook >/dev/null 2>&1; then
+    add-zsh-hook preexec _backchannel_preexec   # de-dupes by function name
+    add-zsh-hook precmd  _backchannel_precmd
+  else
+    case " ${preexec_functions[*]} " in *" _backchannel_preexec "*) ;; *) preexec_functions+=(_backchannel_preexec) ;; esac
+    case " ${precmd_functions[*]}  " in *" _backchannel_precmd "*)  ;; *) precmd_functions+=(_backchannel_precmd)   ;; esac
+  fi
+
+elif [ -n "${BASH_VERSION:-}" ]; then
+  # bash: DEBUG trap (before each command, $BASH_COMMAND) + PROMPT_COMMAND (after).
+  # We gate on _BACKCHANNEL_AT_PROMPT so only the FIRST command of an interactive
+  # line is tracked and our own bookkeeping is never treated as a command.
+  _BACKCHANNEL_AT_PROMPT=1
+
+  _backchannel_debug_trap() {
+    [ "${_BACKCHANNEL_AT_PROMPT:-0}" = "1" ] && return 0
+    case "$BASH_COMMAND" in
+      _backchannel_*|"$PROMPT_COMMAND") return 0 ;;
+    esac
+    _backchannel_should_track "$BASH_COMMAND"
+    # Suppress further DEBUG hits for this command line until PROMPT_COMMAND.
+    _BACKCHANNEL_AT_PROMPT=1
+  }
+
+  _backchannel_prompt_command() {
+    _backchannel_post
+    _BACKCHANNEL_AT_PROMPT=0   # re-open the trap for the next command line
+  }
+
+  trap '_backchannel_debug_trap' DEBUG
+
+  # Prepend our handler to PROMPT_COMMAND exactly once (guarded; preserves yours).
+  case "${PROMPT_COMMAND:-}" in
+    *_backchannel_prompt_command*) ;;
+    "")  PROMPT_COMMAND="_backchannel_prompt_command" ;;
+    *)   PROMPT_COMMAND="_backchannel_prompt_command;${PROMPT_COMMAND}" ;;
+  esac
+fi
+
+return 0 2>/dev/null || true
+SHELLEOF
+chmod 600 "$SERVER_FILE" 2>/dev/null || :
+chmod 644 "$SHELL_SNIPPET" 2>/dev/null || :
+
+# (3) Detect the user's shell and wire a single guarded source line into the
+# right rc file. We pick the rc by the login shell ($SHELL), guarded by a marker
+# so re-running the installer never duplicates the line.
+SHELL_WIRED=""
+BC_MARKER="# >>> backchannel shell integration >>>"
+BC_SOURCE_LINE="source \"$SHELL_SNIPPET\""
+
+# Choose the rc file from the login shell's basename.
+_login_shell="${SHELL##*/}"
+case "$_login_shell" in
+  zsh)  RC_FILE="${ZDOTDIR:-$HOME}/.zshrc" ;;
+  bash) RC_FILE="$HOME/.bashrc" ;;
+  *)
+    # Unknown shell: fall back to whichever rc already exists, preferring zsh.
+    if [ -f "$HOME/.zshrc" ]; then RC_FILE="$HOME/.zshrc"
+    elif [ -f "$HOME/.bashrc" ]; then RC_FILE="$HOME/.bashrc"
+    else RC_FILE="" ; fi
+    ;;
+esac
+
+if [ -n "$RC_FILE" ]; then
+  # Idempotent: only append the guarded block if our marker isn't already there.
+  if [ -f "$RC_FILE" ] && grep -qF "$BC_MARKER" "$RC_FILE" 2>/dev/null; then
+    SHELL_WIRED="already"
+  else
+    {
+      printf '\n%s\n' "$BC_MARKER"
+      printf '%s\n' "[ -f \"$SHELL_SNIPPET\" ] && $BC_SOURCE_LINE"
+      printf '%s\n' "# <<< backchannel shell integration <<<"
+    } >> "$RC_FILE" 2>/dev/null && SHELL_WIRED="$RC_FILE"
+  fi
+fi
+
+# --------------------------------------------------------------------------
 # Sign in — mint a single-use pairing code and open the browser straight in.
 # The short code (8 chars, 5-min TTL, one-time) is safe to carry in a URL; the
 # long token never is. If we can't mint a code or can't open a browser, we fall
@@ -416,6 +660,11 @@ if [ "$merged_via" = "manual" ]; then
 else
   say "  hooks:        wired into $SETTINGS_FILE (via $merged_via)"
 fi
+case "$SHELL_WIRED" in
+  "")        say "  cli agents:   shell integration NOT wired (unknown shell — source $SHELL_SNIPPET manually)" ;;
+  already)   say "  cli agents:   covered — shell integration already in your rc (codex, aider, gemini, ...)" ;;
+  *)         say "  cli agents:   covered — shell integration added to $SHELL_WIRED (codex, aider, gemini, ...)" ;;
+esac
 say "  ------------------------------------------------------------"
 say ""
 say "  RECOVERY PHRASE — save this. It's the ONLY way to recover your name:"
