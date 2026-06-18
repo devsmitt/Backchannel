@@ -294,6 +294,9 @@
   .installblock .recover-link:hover { color: var(--dim); }
   .installblock .recoverfields { text-align: left; margin-top: 12px; }
   .installblock .recoverfields .editline { margin-top: 10px; }
+  .installblock .phrasegrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .installblock .phrasegrid .phraseword { width: 100%; text-align: center; padding: 9px 6px; }
+  @media (max-width: 720px) { .installblock .phrasegrid { grid-template-columns: repeat(2, 1fr); } }
   .installblock .recoverfields .editline input { width: 100%; }
   .installblock .recoverfields .gatebtn { margin-top: 12px; }
   #signinErr { margin-top: 16px; color: var(--danger); opacity: 0; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em; transition: opacity 240ms ease; min-height: 1em; }
@@ -363,8 +366,24 @@
   .linkcode .lc-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
   .linkcode .lc-code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.22em; color: var(--live); margin: 8px 0 6px; user-select: all; }
   .linkcode .lc-exp { font-family: var(--mono); font-size: 10.5px; color: var(--ghost); }
-  #linkDevice { margin-left: 16px; }
   .rotate-link { margin-left: 16px; }
+
+  /* profile tabs (own profile) */
+  .profile-tabs { display: flex; gap: 4px; padding: 0 28px; margin-top: 4px; border-bottom: 1px solid var(--line); }
+  .ptab { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); background: none; border: none; border-bottom: 2px solid transparent; padding: 12px 10px; margin-bottom: -1px; cursor: pointer; }
+  .ptab:hover { color: var(--dim); }
+  .ptab.sel { color: var(--text); border-bottom-color: var(--live); }
+
+  /* active environments */
+  .env-sub { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-bottom: 12px; }
+  .env-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+  .env-row:first-of-type { border-top: none; }
+  .env-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .env-label { font-size: 13.5px; color: var(--text); }
+  .env-current { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; color: var(--live); margin-left: 6px; }
+  .env-meta { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .env-remove { margin-left: auto; flex: 0 0 auto; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; color: var(--danger); background: none; border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  .env-remove:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 
   /* invite codes (own profile) */
   .invites-section .invites-sub { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-bottom: 12px; }
@@ -509,21 +528,31 @@
         </div>
       </div>
 
-      <!-- moving an existing account onto this device -->
+      <!-- already have an account: pair this device, or recover -->
       <div class="installblock">
-        <button class="reveal" id="moveBtn" type="button">moving devices? &rarr;</button>
+        <button class="reveal" id="moveBtn" type="button">already have an account? &rarr;</button>
         <div class="installsteps" id="moveSteps" hidden>
-          <div class="sub">On a device you're already signed in on: click your name (top-right) &rarr; <b>link a device</b>, and enter the code it shows you:</div>
-          <div class="tokenbox">
-            <span class="caret">›</span>
-            <input id="linkCode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="device-link code" />
-            <button class="gatebtn" id="linkBtn" type="button">link</button>
+          <div class="movehow">
+            <div class="movelabel">pair this device</div>
+            <div class="sub">On a machine you're already in: your name &rarr; <b>pair a device</b>, then enter the code here. Adds this device; nothing else signs out.</div>
+            <div class="tokenbox">
+              <span class="caret">›</span>
+              <input id="linkCode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="pair code" />
+              <button class="gatebtn" id="linkBtn" type="button">pair</button>
+            </div>
           </div>
-          <button class="reveal recover-link" id="recoverBtn" type="button">lost all your devices? &rarr;</button>
+          <button class="reveal recover-link" id="recoverBtn" type="button">lost every device? recover &rarr;</button>
           <div class="recoverfields" id="recoverFields" hidden>
-            <div class="sub">Recover with the username + recovery phrase you saved at sign-up.</div>
+            <div class="sub">Your username + the 6 words you saved. <b>This signs out every other device</b> and starts fresh here.</div>
             <div class="editline"><input class="field" id="recUser" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="username" /></div>
-            <div class="editline"><input class="field" id="recPhrase" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="recovery phrase" /></div>
+            <div class="phrasegrid" id="phraseGrid">
+              <input class="field phraseword" data-i="0" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="1" />
+              <input class="field phraseword" data-i="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="2" />
+              <input class="field phraseword" data-i="2" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="3" />
+              <input class="field phraseword" data-i="3" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="4" />
+              <input class="field phraseword" data-i="4" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="5" />
+              <input class="field phraseword" data-i="5" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="6" />
+            </div>
             <button class="gatebtn" id="recBtn" type="button">recover account</button>
           </div>
         </div>
@@ -1104,6 +1133,7 @@
         case "typing":       onTyping(m); break;
         case "room_opened":  onRoomOpened(m.room, m.focus); break;
         case "dms":          onDms(m); break;
+        case "devices":      renderDevices(m.devices || []); break;
         case "profile_data": onProfileData(m.user); break;
         case "denied":       break;  // sent while not present; ignore quietly
         case "error":        onAuthError(m.message); break;
@@ -1274,36 +1304,14 @@
 
     var MSG_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
 
-    let html =
-      '<div class="profile-head">' +
-        '<div class="profile-actions">' +
-          (isYou ? '' : '<button class="profile-message" id="msgBtn" title="message @' + esc(u.username) + '">' + MSG_ICON + 'message</button>') +
-          '<button class="profile-close" id="pClose">×</button>' +
-        '</div>' +
-        '<div class="profile-handle' + (isYou ? ' you' : '') + '" style="color:' + colorFor(u.username) + '">@' + esc(u.username) + '</div>' +
-        '<div class="profile-since">building here since ' + esc(sinceStr) + '</div>' +
-        '<div id="taglineView" class="profile-tagline' + (u.tagline ? '' : ' placeholder') + '">' +
-          (u.tagline ? esc(u.tagline) : (isYou ? 'add a tagline' : 'no tagline yet')) +
-        '</div>' +
-        (isYou
-          ? '<span class="edit-link" id="editTagline">edit tagline</span>' +
-            '<span class="edit-link" id="linkDevice">link a device</span>' +
-            '<span class="edit-link rotate-link" id="rotateToken">rotate token</span>' +
-            '<div class="linkcode" id="linkCodeOut" hidden></div>'
-          : '') +
-      '</div>' +
-      '<div class="stats">' +
-        '<div class="stat"><div class="v accent">' + esc(String(streakCount(u.streak))) + '</div><div class="l">streak</div></div>' +
-        '<div class="stat"><div class="v">' + esc(String(u.totalBuilds || 0)) + '</div><div class="l">sessions</div></div>' +
-        '<div class="stat"><div class="v">' + esc(btStr) + '</div><div class="l">build-time</div></div>' +
-      '</div>' +
-      (isYou
-        ? '<div class="profile-section">' +
-            '<div class="label">your color</div>' +
-            '<div class="colorsub">this is the color others see your name in.</div>' +
-            '<div class="swatches" id="swatches"></div>' +
-          '</div>'
-        : '') +
+    const colorSection = isYou
+      ? '<div class="profile-section">' +
+          '<div class="label">your color</div>' +
+          '<div class="colorsub">the color others see your name in.</div>' +
+          '<div class="swatches" id="swatches"></div>' +
+        '</div>'
+      : '';
+    const projectsSection =
       '<div class="profile-section">' +
         '<div class="label">projects</div>' +
         '<div id="projectsView"></div>' +
@@ -1317,34 +1325,85 @@
             '<div class="saverow"><button class="smallbtn" id="apSave">add</button>' +
             '<button class="smallbtn ghost" id="apCancel">cancel</button></div>' +
           '</div>' : '') +
+      '</div>';
+    const envSection =
+      '<div class="profile-section">' +
+        '<div class="label">active environments</div>' +
+        '<div class="env-sub">machines & browsers paired to your account — all stay active.</div>' +
+        '<div id="devicesView"></div>' +
+        '<span class="edit-link" id="pairDevice">+ pair a device</span>' +
+        '<span class="edit-link rotate-link" id="rotateToken">rotate this token</span>' +
+        '<div class="linkcode" id="linkCodeOut" hidden></div>' +
+      '</div>';
+    const inviteSection =
+      '<div class="profile-section invites-section">' +
+        '<div class="label">invite codes</div>' +
+        '<div class="invites-sub">bring in builders you trust. each code works once.</div>' +
+        '<div id="invitesView"></div>' +
+      '</div>';
+    const leaveSection =
+      '<div class="profile-section leave-section">' +
+        '<div class="label">leave backchannel</div>' +
+        '<div class="leave-row">' +
+          '<div class="leave-h">remove from this device</div>' +
+          '<div class="cmd"><code id="uninstallCmd"></code><button class="copybtn" id="copyUninstall" type="button">copy</button></div>' +
+        '</div>' +
+        '<div class="leave-row">' +
+          '<div class="leave-h">delete your account</div>' +
+          '<div class="leave-sub">erases your profile, projects, and messages everywhere. can’t be undone.</div>' +
+          '<button class="leave-del" id="deleteAccount" type="button">delete account</button>' +
+        '</div>' +
+      '</div>';
+
+    let html =
+      '<div class="profile-head">' +
+        '<div class="profile-actions">' +
+          (isYou ? '' : '<button class="profile-message" id="msgBtn" title="message @' + esc(u.username) + '">' + MSG_ICON + 'message</button>') +
+          '<button class="profile-close" id="pClose">×</button>' +
+        '</div>' +
+        '<div class="profile-handle' + (isYou ? ' you' : '') + '" style="color:' + colorFor(u.username) + '">@' + esc(u.username) + '</div>' +
+        '<div class="profile-since">building here since ' + esc(sinceStr) + '</div>' +
+        '<div id="taglineView" class="profile-tagline' + (u.tagline ? '' : ' placeholder') + '">' +
+          (u.tagline ? esc(u.tagline) : (isYou ? 'add a tagline' : 'no tagline yet')) +
+        '</div>' +
+        (isYou ? '<span class="edit-link" id="editTagline">edit tagline</span>' : '') +
+      '</div>' +
+      '<div class="stats">' +
+        '<div class="stat"><div class="v accent">' + esc(String(streakCount(u.streak))) + '</div><div class="l">streak</div></div>' +
+        '<div class="stat"><div class="v">' + esc(String(u.totalBuilds || 0)) + '</div><div class="l">sessions</div></div>' +
+        '<div class="stat"><div class="v">' + esc(btStr) + '</div><div class="l">build-time</div></div>' +
       '</div>' +
       (isYou
-        ? '<div class="profile-section invites-section">' +
-            '<div class="label">invite codes</div>' +
-            '<div class="invites-sub">bring in builders you trust. each code works once.</div>' +
-            '<div id="invitesView"></div>' +
-          '</div>'
-        : '') +
-      (isYou
-        ? '<div class="profile-section leave-section">' +
-            '<div class="label">leave backchannel</div>' +
-            '<div class="leave-row">' +
-              '<div class="leave-h">remove from this device</div>' +
-              '<div class="cmd"><code id="uninstallCmd"></code><button class="copybtn" id="copyUninstall" type="button">copy</button></div>' +
-            '</div>' +
-            '<div class="leave-row">' +
-              '<div class="leave-h">delete your account</div>' +
-              '<div class="leave-sub">erases your profile, projects, and messages everywhere. can’t be undone.</div>' +
-              '<button class="leave-del" id="deleteAccount" type="button">delete account</button>' +
-            '</div>' +
-          '</div>'
-        : '');
+        ? '<div class="profile-tabs">' +
+            '<button class="ptab sel" id="ptabProfile" type="button">profile</button>' +
+            '<button class="ptab" id="ptabAccount" type="button">account</button>' +
+          '</div>' +
+          '<div id="panelProfile">' + colorSection + projectsSection + '</div>' +
+          '<div id="panelAccount" hidden>' + envSection + inviteSection + leaveSection + '</div>'
+        : projectsSection);
 
     profileCard.innerHTML = html;
     bindProfileClose();
     renderProjects(u.projects || [], isYou);
     if (isYou) renderInvites(u.invites || []);
     if (isYou) renderSwatches();   // color picker lives in your profile now
+
+    if (isYou) {
+      // Profile / Account tabs keep the card from getting long.
+      const tProfile = document.getElementById("ptabProfile");
+      const tAccount = document.getElementById("ptabAccount");
+      const pProfile = document.getElementById("panelProfile");
+      const pAccount = document.getElementById("panelAccount");
+      let devicesLoaded = false;
+      const showTab = (acct) => {
+        tProfile.classList.toggle("sel", !acct);
+        tAccount.classList.toggle("sel", acct);
+        pProfile.hidden = acct; pAccount.hidden = !acct;
+        if (acct && !devicesLoaded) { devicesLoaded = true; send({ type: "list_devices" }); }  // lazy-load environments
+      };
+      if (tProfile) tProfile.addEventListener("click", () => showTab(false));
+      if (tAccount) tAccount.addEventListener("click", () => showTab(true));
+    }
 
     if (!isYou) {
       const msgBtn = document.getElementById("msgBtn");
@@ -1361,6 +1420,35 @@
              totalBuilds: u.totalBuilds, buildSeconds: u.buildSeconds, since: u.since };
       wireOwnProfileEdits(u);
     }
+  }
+
+  function renderDevices(devices) {
+    const wrap = document.getElementById("devicesView");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    if (!devices.length) { wrap.innerHTML = '<div class="noprojects">no paired environments</div>'; return; }
+    devices.forEach((d) => {
+      const row = document.createElement("div");
+      row.className = "env-row";
+      const added = d.createdAt ? new Date(d.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+      const label = d.label === "cli" ? "terminal" : (d.label === "browser" ? "browser" : (d.label || "environment"));
+      row.innerHTML =
+        '<div class="env-info">' +
+          '<span class="env-label">' + esc(label) + (d.current ? ' <span class="env-current">this one</span>' : '') + '</span>' +
+          '<span class="env-meta">paired ' + esc(added) + '</span>' +
+        '</div>';
+      if (!d.current) {
+        const btn = document.createElement("button");
+        btn.className = "env-remove"; btn.type = "button"; btn.textContent = "revoke";
+        btn.addEventListener("click", () => {
+          if (window.confirm("Revoke this environment? It will be signed out immediately. This can't be undone.")) {
+            send({ type: "remove_device", id: d.id });
+          }
+        });
+        row.appendChild(btn);
+      }
+      wrap.appendChild(row);
+    });
   }
 
   function renderInvites(invites) {
@@ -1487,30 +1575,30 @@
     // Reuses the pairing endpoint: POST /pair/new {token} -> a short code the
     // user types on their other device (sign-in screen -> "moving devices?").
     // No secret is ever shown or typed — the code redeems to the token server-side.
-    const linkDevice = document.getElementById("linkDevice");
+    const linkDevice = document.getElementById("pairDevice");
     const linkOut = document.getElementById("linkCodeOut");
     if (linkDevice && linkOut) {
       linkDevice.addEventListener("click", () => {
         if (!token) return;
         linkDevice.style.pointerEvents = "none";
-        linkDevice.textContent = "linking…";
+        linkDevice.textContent = "creating…";
         fetch("/pair/new", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: token }) })
           .then((r) => (r.ok ? r.json() : null))
           .then((d) => {
             linkDevice.style.pointerEvents = "";
-            linkDevice.textContent = "link a device";
+            linkDevice.textContent = "+ pair a device";
             if (d && d.code) {
               linkOut.hidden = false;
               linkOut.innerHTML =
-                '<div class="lc-label">enter this on your other device → “moving devices?”</div>' +
+                '<div class="lc-label">on the other device → “pair this device” → enter:</div>' +
                 '<div class="lc-code">' + esc(d.code) + '</div>' +
-                '<div class="lc-exp">expires in 5 minutes · single use</div>';
+                '<div class="lc-exp">expires in 5 minutes · single use · adds the device</div>';
             } else {
               linkOut.hidden = false;
               linkOut.innerHTML = '<div class="lc-exp">couldn’t create a code — try again</div>';
             }
           })
-          .catch(() => { linkDevice.style.pointerEvents = ""; linkDevice.textContent = "link a device"; });
+          .catch(() => { linkDevice.style.pointerEvents = ""; linkDevice.textContent = "+ pair a device"; });
       });
     }
 
@@ -1669,15 +1757,37 @@
   const moveSteps = document.getElementById("moveSteps");
   if (moveBtn && moveSteps) moveBtn.addEventListener("click", () => {
     moveSteps.hidden = !moveSteps.hidden;
-    moveBtn.textContent = moveSteps.hidden ? "moving devices? →" : "moving devices? ↓";
+    moveBtn.textContent = moveSteps.hidden ? "already have an account? →" : "already have an account? ↓";
   });
 
   const recoverBtn = document.getElementById("recoverBtn");
   const recoverFields = document.getElementById("recoverFields");
   if (recoverBtn && recoverFields) recoverBtn.addEventListener("click", () => {
     recoverFields.hidden = !recoverFields.hidden;
-    recoverBtn.textContent = recoverFields.hidden ? "lost all your devices? →" : "lost all your devices? ↓";
+    recoverBtn.textContent = recoverFields.hidden ? "lost every device? recover →" : "lost every device? recover ↓";
     if (!recoverFields.hidden) { try { document.getElementById("recUser").focus(); } catch (_) {} }
+  });
+
+  // The 6 recovery-phrase boxes: pasting a full phrase into any box spreads the
+  // words across all six; typing a space hops to the next box.
+  const phraseWords = Array.from(document.querySelectorAll(".phraseword"));
+  function phraseValue() { return phraseWords.map((b) => b.value.trim()).filter(Boolean).join(" "); }
+  phraseWords.forEach((box, i) => {
+    box.addEventListener("paste", (e) => {
+      const text = (e.clipboardData || window.clipboardData).getData("text") || "";
+      const words = text.trim().split(/[\s]+/).filter(Boolean);
+      if (words.length > 1) {
+        e.preventDefault();
+        words.slice(0, phraseWords.length - i).forEach((w, k) => { phraseWords[i + k].value = w; });
+        const next = phraseWords[Math.min(i + words.length, phraseWords.length - 1)];
+        try { next.focus(); } catch (_) {}
+      }
+    });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === " ") { e.preventDefault(); if (phraseWords[i + 1]) phraseWords[i + 1].focus(); }
+      else if (e.key === "Enter") { e.preventDefault(); submitRecover(); }
+      else if (e.key === "Backspace" && !box.value && phraseWords[i - 1]) phraseWords[i - 1].focus();
+    });
   });
 
   // Device-link: redeem a short code minted on another signed-in device.
@@ -1695,13 +1805,13 @@
   if (linkBtn)  linkBtn.addEventListener("click", submitLink);
   if (linkCode) linkCode.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitLink(); } });
 
-  // Recover: username + the saved recovery phrase rebinds onto a new token here.
+  // Recover (DESTRUCTIVE): username + the 6 saved words. Wipes other devices,
+  // mints a fresh token here. The phrase is read from the 6 boxes.
   const recUser   = document.getElementById("recUser");
-  const recPhrase = document.getElementById("recPhrase");
   const recBtn    = document.getElementById("recBtn");
   function submitRecover() {
     const u = (recUser.value || "").trim().toLowerCase();
-    const p = (recPhrase.value || "").trim();
+    const p = phraseValue();
     if (!u || !p) return;
     clearSigninError();
     const newToken = genToken();
@@ -1711,7 +1821,6 @@
       .catch((e) => showSigninError(e.message || "recovery failed"));
   }
   if (recBtn) recBtn.addEventListener("click", submitRecover);
-  if (recPhrase) recPhrase.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitRecover(); } });
 
   // ---- Composer (present only) --------------------------------------------
   let sending = false;  // re-entrancy guard while a pending image uploads

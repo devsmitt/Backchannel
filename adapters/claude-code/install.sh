@@ -163,21 +163,26 @@ open_url() {
 }
 
 # --------------------------------------------------------------------------
-# Move an existing account onto this device. Two self-contained ways:
-#   • a device-link CODE  (minted on another signed-in device:
-#                          backchannel -> your name -> "link a device")
+# Add this environment to an existing account. Two self-contained ways:
+#   • a PAIRING CODE  (minted on another signed-in device:
+#                      backchannel -> your name -> "pair a device")
+#                      ADDITIVE: every other environment stays signed in.
 #   • your USERNAME + RECOVERY PHRASE (the words saved at sign-up)
+#                      DESTRUCTIVE: signs out every other environment.
 # We auto-detect: input with a space = a phrase (we then ask the username);
 # otherwise = a code. Sets TOKEN (and RECOVERY when known) + MOVED=yes.
 # --------------------------------------------------------------------------
 move_existing() {
   say ""
-  say "  move your account here:"
-  say "   • a device-link code (other device: your name -> 'link a device'), or"
+  say "  add this environment to your account:"
+  say "   • a pairing code (signed-in device: your name -> 'pair a device')"
+  say "     -> adds this machine; every other stays signed in, or"
   say "   • your username + recovery phrase"
+  say "     -> recovery, only if you've lost access: signs out every"
+  say "        other environment and starts fresh here"
   say ""
   while : ; do
-    printf '  paste a device-link code OR your recovery phrase: ' > /dev/tty
+    printf '  paste a pairing code OR your recovery phrase: ' > /dev/tty
     IFS= read -r _in < /dev/tty || die "could not read input."
     _in="$(printf '%s' "$_in" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     [ -n "$_in" ] || { say "  nothing entered — try again."; continue; }
@@ -194,7 +199,7 @@ move_existing() {
         _out="$(post_json "$SERVER/recover" "{\"username\":\"$_ju\",\"recovery\":\"$_jr\",\"newToken\":\"$_jt\"}")"
         last_code
         case "$HTTP_CODE" in
-          200) RECOVERY="$_in"; USERNAME="$_mu"; MOVED="yes"; say "  recovered: $_mu"; return 0 ;;
+          200) RECOVERY="$_in"; USERNAME="$_mu"; MOVED="yes"; say "  recovered: $_mu (other environments signed out)"; return 0 ;;
           403) say "  that username + phrase didn't match — try again." ;;
           429) say "  too many tries — wait a few minutes, then retry." ;;
           000) die "could not reach $SERVER — check your connection." ;;
@@ -202,14 +207,14 @@ move_existing() {
         esac
         ;;
       *)
-        # No whitespace -> a device-link code.
+        # No whitespace -> a pairing code (additive).
         _jc="$(json_escape "$_in")"
         _out="$(post_json "$SERVER/pair/redeem" "{\"code\":\"$_jc\"}")"
         last_code
         if [ "$HTTP_CODE" = "200" ]; then
           TOKEN="$(printf '%s' "$_out" | json_field token)"
-          if [ -n "$TOKEN" ]; then MOVED="yes"; say "  device linked."; return 0; fi
-          say "  empty link response — try again."
+          if [ -n "$TOKEN" ]; then MOVED="yes"; say "  this environment is paired (others still signed in)."; return 0; fi
+          say "  empty pairing response — try again."
         elif [ "$HTTP_CODE" = "000" ]; then
           die "could not reach $SERVER — check your connection."
         else
@@ -247,14 +252,14 @@ fi
 # Fork only when this machine has no token yet. Enter defaults to "new".
 if [ -z "$EXISTING_INSTALL" ]; then
   say ""
-  say "  new here, or moving an account onto this device?"
+  say "  new here, or adding this environment to an existing account?"
   while [ -z "$CHOICE" ]; do
-    printf '  [n] new account   [m] move existing  (n/m): ' > /dev/tty
+    printf '  [n] new account   [a] add this environment  (n/a): ' > /dev/tty
     IFS= read -r _c < /dev/tty || die "could not read choice."
     case "$(printf '%s' "$_c" | tr 'A-Z' 'a-z' | tr -d '[:space:]')" in
-      n|new|"") CHOICE="new" ;;
-      m|move)   CHOICE="move" ;;
-      *)        say "  please type n or m." ;;
+      n|new|"")        CHOICE="new" ;;
+      a|add|m|move)    CHOICE="move" ;;
+      *)               say "  please type n or a." ;;
     esac
   done
 fi
@@ -996,7 +1001,7 @@ say "  ------------------------------------------------------------"
 if [ -n "$EXISTING_INSTALL" ]; then
   say "  re-wired existing install (identity unchanged)"
 elif [ -n "$MOVED" ]; then
-  say "  moved your account onto this device"
+  say "  added this environment to your account"
 else
   say "  installed as: $USERNAME"
 fi
