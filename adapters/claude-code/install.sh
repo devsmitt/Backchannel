@@ -62,6 +62,16 @@ gen_token() {
   fi
 }
 
+# A friendly name for this environment, sent with claim/pair/recover so the
+# profile lists real machine names ("devons-mbp") instead of a generic label.
+# Strips a trailing .local and anything outside a safe charset; caps at 40 chars.
+device_label() {
+  _h="$(hostname 2>/dev/null || printf '')"
+  _h="$(printf '%s' "$_h" | sed 's/\.local$//' | tr -cd 'A-Za-z0-9 ._-' | cut -c1-40)"
+  if [ -n "$_h" ]; then printf '%s' "$_h"; else printf 'terminal'; fi
+}
+DEVICE_LABEL="$(device_label)"
+
 # Embedded wordlist for the recovery phrase (kept short + readable; no ambiguity).
 WORDLIST="amber anchor apple arbor atlas basil beacon birch bison bramble
 breeze cedar cinder clover cobalt comet copper coral cosmos cypress delta
@@ -195,8 +205,8 @@ move_existing() {
         _mu="$(printf '%s' "$_mu" | tr 'A-Z' 'a-z' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         [ -n "$_mu" ] || { say "  username required — try again."; continue; }
         TOKEN="$(gen_token)"
-        _ju="$(json_escape "$_mu")"; _jr="$(json_escape "$_in")"; _jt="$(json_escape "$TOKEN")"
-        _out="$(post_json "$SERVER/recover" "{\"username\":\"$_ju\",\"recovery\":\"$_jr\",\"newToken\":\"$_jt\"}")"
+        _ju="$(json_escape "$_mu")"; _jr="$(json_escape "$_in")"; _jt="$(json_escape "$TOKEN")"; _jl="$(json_escape "$DEVICE_LABEL")"
+        _out="$(post_json "$SERVER/recover" "{\"username\":\"$_ju\",\"recovery\":\"$_jr\",\"newToken\":\"$_jt\",\"label\":\"$_jl\"}")"
         last_code
         case "$HTTP_CODE" in
           200) RECOVERY="$_in"; USERNAME="$_mu"; MOVED="yes"; say "  recovered: $_mu (other environments signed out)"; return 0 ;;
@@ -208,8 +218,8 @@ move_existing() {
         ;;
       *)
         # No whitespace -> a pairing code (additive).
-        _jc="$(json_escape "$_in")"
-        _out="$(post_json "$SERVER/pair/redeem" "{\"code\":\"$_jc\"}")"
+        _jc="$(json_escape "$_in")"; _jl="$(json_escape "$DEVICE_LABEL")"
+        _out="$(post_json "$SERVER/pair/redeem" "{\"code\":\"$_jc\",\"label\":\"$_jl\"}")"
         last_code
         if [ "$HTTP_CODE" = "200" ]; then
           TOKEN="$(printf '%s' "$_out" | json_field token)"
@@ -243,9 +253,23 @@ CHOICE=""
 if [ -s "$TOKEN_FILE" ]; then
   TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE" 2>/dev/null || printf '')"
   if [ -n "$TOKEN" ]; then
-    EXISTING_INSTALL="yes"
-    [ -s "$RECOVERY_FILE" ] && RECOVERY="$(cat "$RECOVERY_FILE" 2>/dev/null || printf '')" || RECOVERY=""
-    say "  existing install found — keeping your identity, re-wiring hooks."
+    # Confirm the token is still live before reusing it. A recovery on another
+    # machine revokes this environment server-side, leaving a dead token on disk;
+    # a hard 401 means exactly that, so we drop the reuse path and let the user
+    # reconnect (pair / claim). A network error (000/5xx) is NOT treated as dead,
+    # so installs still work offline and survive transient server hiccups.
+    _jt="$(json_escape "$TOKEN")"
+    _out="$(post_json "$SERVER/verify" "{\"token\":\"$_jt\"}")"
+    last_code
+    if [ "$HTTP_CODE" = "401" ]; then
+      say "  this environment was signed out remotely (a recovery on another"
+      say "  machine). let's reconnect it."
+      TOKEN=""
+    else
+      EXISTING_INSTALL="yes"
+      [ -s "$RECOVERY_FILE" ] && RECOVERY="$(cat "$RECOVERY_FILE" 2>/dev/null || printf '')" || RECOVERY=""
+      say "  existing install found — keeping your identity, re-wiring hooks."
+    fi
   fi
 fi
 
@@ -306,9 +330,10 @@ while [ "$CHOICE" = "new" ] ; do
   _t="$(json_escape "$TOKEN")"
   _r="$(json_escape "$RECOVERY")"
   _ic="$(json_escape "$INVITE")"
+  _jl="$(json_escape "$DEVICE_LABEL")"
 
   say "  claiming \"$USERNAME\"..."
-  _out="$(post_json "$SERVER/claim" "{\"username\":\"$_u\",\"token\":\"$_t\",\"recovery\":\"$_r\",\"code\":\"$_ic\"}")"
+  _out="$(post_json "$SERVER/claim" "{\"username\":\"$_u\",\"token\":\"$_t\",\"recovery\":\"$_r\",\"code\":\"$_ic\",\"label\":\"$_jl\"}")"
   last_code
 
   case "$HTTP_CODE" in

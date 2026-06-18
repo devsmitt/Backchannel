@@ -263,12 +263,6 @@
   .pulse { display: inline-flex; align-items: center; margin: 24px auto 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--dim); }
   @media (prefers-reduced-motion: reduce) { .orb::before, .orb::after { display: none; } }
 
-  .tokenbox { display: flex; align-items: center; gap: 0.6em; width: 100%; max-width: 360px; margin: 24px auto 0; background: var(--rail); border: 1px solid var(--ghost); border-radius: 8px; padding: 10px 14px; }
-  .tokenbox .caret { font-family: var(--mono); color: var(--faint); }
-  #tokenInput { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font-family: var(--mono); font-size: 13.5px; letter-spacing: 0.04em; }
-  #tokenInput::placeholder { color: var(--ghost); }
-  .gatebtn { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bg); background: var(--live); border: none; border-radius: 6px; padding: 8px 15px; font-weight: 600; cursor: pointer; }
-  .gatebtn:hover { filter: brightness(1.07); }
   .installblock { margin: 28px auto 0; max-width: 380px; text-align: left; }
   .installblock .reveal { display: block; margin: 0 auto; background: none; border: none; cursor: pointer; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.12em; color: var(--dim); padding: 6px; }
   .installblock .reveal:hover { color: var(--live); }
@@ -282,23 +276,21 @@
   .installblock .copybtn { flex: 0 0 auto; background: color-mix(in srgb, var(--live) 10%, transparent); border: 1px solid color-mix(in srgb, var(--live) 25%, transparent); color: var(--live); border-radius: 6px; font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer; }
   .installblock .copybtn:hover { background: color-mix(in srgb, var(--live) 18%, transparent); }
   .installblock .sub { font-family: var(--mono); font-size: 10.5px; line-height: 1.7; letter-spacing: 0.02em; color: var(--ghost); margin-top: 14px; }
-  .installblock .movehow { text-align: left; }
+  .installblock .authpane { text-align: left; }
   .installblock .movelabel { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint); margin-top: 16px; }
-  .installblock .movehow .tokenbox { margin-top: 12px; }
-  .installblock .movehow .editline { margin-top: 10px; }
-  .installblock .movehow .editline input { width: 100%; }
-  .installblock .movehow .gatebtn { margin-top: 12px; }
+  .installblock .authfield { width: 100%; margin-top: 12px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.04em; }
+  .installblock .authbtn { width: 100%; margin-top: 12px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bg); background: var(--live); border: none; border-radius: 8px; padding: 11px 14px; font-weight: 600; cursor: pointer; transition: filter 140ms ease, background 140ms ease; }
+  .installblock .authbtn:hover { filter: brightness(1.07); }
+  .installblock .authbtn.danger { color: var(--danger); background: none; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); }
+  .installblock .authbtn.danger:hover { filter: none; background: color-mix(in srgb, var(--danger) 12%, transparent); }
   .installblock .orline { display: flex; align-items: center; gap: 12px; margin: 22px 0 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ghost); }
   .installblock .orline::before, .installblock .orline::after { content: ""; height: 1px; background: var(--line); flex: 1; }
   .installblock .recover-link { margin-top: 18px; font-size: 11px; color: var(--faint); }
   .installblock .recover-link:hover { color: var(--dim); }
   .installblock .recoverfields { text-align: left; margin-top: 12px; }
-  .installblock .recoverfields .editline { margin-top: 10px; }
-  .installblock .phrasegrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
-  .installblock .phrasegrid .phraseword { width: 100%; text-align: center; padding: 9px 6px; }
+  .installblock .phrasegrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .installblock .phrasegrid .phraseword { width: 100%; text-align: center; padding: 9px 6px; font-family: var(--mono); font-size: 13px; }
   @media (max-width: 720px) { .installblock .phrasegrid { grid-template-columns: repeat(2, 1fr); } }
-  .installblock .recoverfields .editline input { width: 100%; }
-  .installblock .recoverfields .gatebtn { margin-top: 12px; }
   #signinErr { margin-top: 16px; color: var(--danger); opacity: 0; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em; transition: opacity 240ms ease; min-height: 1em; }
   body.signin-error #signinErr { opacity: 0.95; }
   .signedas { margin-top: 20px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; color: var(--ghost); text-transform: uppercase; }
@@ -366,7 +358,6 @@
   .linkcode .lc-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
   .linkcode .lc-code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.22em; color: var(--live); margin: 8px 0 6px; user-select: all; }
   .linkcode .lc-exp { font-family: var(--mono); font-size: 10.5px; color: var(--ghost); }
-  .rotate-link { margin-left: 16px; }
 
   /* profile tabs (own profile) */
   .profile-tabs { display: flex; gap: 4px; padding: 0 28px; margin-top: 4px; border-bottom: 1px solid var(--line); }
@@ -405,8 +396,6 @@
   .leave-section .copybtn { flex: 0 0 auto; background: color-mix(in srgb, var(--live) 10%, transparent); border: 1px solid color-mix(in srgb, var(--live) 25%, transparent); color: var(--live); border-radius: 6px; font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer; }
   .leave-section .leave-del { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: var(--danger); background: none; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); border-radius: 6px; padding: 7px 13px; cursor: pointer; }
   .leave-section .leave-del:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
-  .rotate-link:hover { color: var(--danger); }
-  .rotate-link.busy { color: var(--ghost); cursor: default; }
 
   /* crafted inline add-project composer */
   .addproject-fields { display: none; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 16px; border-top: 1px solid var(--line); }
@@ -532,19 +521,16 @@
       <div class="installblock">
         <button class="reveal" id="moveBtn" type="button">already have an account? &rarr;</button>
         <div class="installsteps" id="moveSteps" hidden>
-          <div class="movehow">
-            <div class="movelabel">pair this device</div>
-            <div class="sub">On a machine you're already in: your name &rarr; <b>pair a device</b>, then enter the code here. Adds this device; nothing else signs out.</div>
-            <div class="tokenbox">
-              <span class="caret">›</span>
-              <input id="linkCode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="pair code" />
-              <button class="gatebtn" id="linkBtn" type="button">pair</button>
-            </div>
+          <div class="authpane">
+            <div class="movelabel">pair this environment</div>
+            <div class="sub">On a machine you're already signed in: open your profile &rarr; <b>account</b> &rarr; <b>pair a device</b>, then enter that code here. Adds this environment &mdash; nothing else signs out.</div>
+            <input class="field authfield" id="linkCode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="pairing code" />
+            <button class="authbtn" id="linkBtn" type="button">pair this environment</button>
           </div>
           <button class="reveal recover-link" id="recoverBtn" type="button">lost every device? recover &rarr;</button>
           <div class="recoverfields" id="recoverFields" hidden>
-            <div class="sub">Your username + the 6 words you saved. <b>This signs out every other device</b> and starts fresh here.</div>
-            <div class="editline"><input class="field" id="recUser" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="username" /></div>
+            <div class="sub"><b>Destructive.</b> Your username + the 6 words you saved. This signs out every other environment and starts fresh here.</div>
+            <input class="field authfield" id="recUser" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="username" />
             <div class="phrasegrid" id="phraseGrid">
               <input class="field phraseword" data-i="0" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="1" />
               <input class="field phraseword" data-i="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="2" />
@@ -553,7 +539,7 @@
               <input class="field phraseword" data-i="4" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="5" />
               <input class="field phraseword" data-i="5" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="6" />
             </div>
-            <button class="gatebtn" id="recBtn" type="button">recover account</button>
+            <button class="authbtn danger" id="recBtn" type="button">recover account</button>
           </div>
         </div>
       </div>
@@ -1329,10 +1315,9 @@
     const envSection =
       '<div class="profile-section">' +
         '<div class="label">active environments</div>' +
-        '<div class="env-sub">machines & browsers paired to your account — all stay active.</div>' +
+        '<div class="env-sub">every machine & browser signed in to your account. each stays active on its own; revoke any one to sign it out.</div>' +
         '<div id="devicesView"></div>' +
         '<span class="edit-link" id="pairDevice">+ pair a device</span>' +
-        '<span class="edit-link rotate-link" id="rotateToken">rotate this token</span>' +
         '<div class="linkcode" id="linkCodeOut" hidden></div>' +
       '</div>';
     const inviteSection =
@@ -1376,10 +1361,12 @@
       (isYou
         ? '<div class="profile-tabs">' +
             '<button class="ptab sel" id="ptabProfile" type="button">profile</button>' +
+            '<button class="ptab" id="ptabInvites" type="button">invites</button>' +
             '<button class="ptab" id="ptabAccount" type="button">account</button>' +
           '</div>' +
           '<div id="panelProfile">' + colorSection + projectsSection + '</div>' +
-          '<div id="panelAccount" hidden>' + envSection + inviteSection + leaveSection + '</div>'
+          '<div id="panelInvites" hidden>' + inviteSection + '</div>' +
+          '<div id="panelAccount" hidden>' + envSection + leaveSection + '</div>'
         : projectsSection);
 
     profileCard.innerHTML = html;
@@ -1389,20 +1376,27 @@
     if (isYou) renderSwatches();   // color picker lives in your profile now
 
     if (isYou) {
-      // Profile / Account tabs keep the card from getting long.
-      const tProfile = document.getElementById("ptabProfile");
-      const tAccount = document.getElementById("ptabAccount");
-      const pProfile = document.getElementById("panelProfile");
-      const pAccount = document.getElementById("panelAccount");
-      let devicesLoaded = false;
-      const showTab = (acct) => {
-        tProfile.classList.toggle("sel", !acct);
-        tAccount.classList.toggle("sel", acct);
-        pProfile.hidden = acct; pAccount.hidden = !acct;
-        if (acct && !devicesLoaded) { devicesLoaded = true; send({ type: "list_devices" }); }  // lazy-load environments
+      // Profile / Invites / Account tabs keep any one panel from getting long.
+      const tabs = {
+        profile: [document.getElementById("ptabProfile"), document.getElementById("panelProfile")],
+        invites: [document.getElementById("ptabInvites"), document.getElementById("panelInvites")],
+        account: [document.getElementById("ptabAccount"), document.getElementById("panelAccount")],
       };
-      if (tProfile) tProfile.addEventListener("click", () => showTab(false));
-      if (tAccount) tAccount.addEventListener("click", () => showTab(true));
+      let devicesLoaded = false;
+      const showTab = (name) => {
+        Object.keys(tabs).forEach((k) => {
+          const btn = tabs[k][0], panel = tabs[k][1];
+          if (!btn || !panel) return;
+          const on = k === name;
+          btn.classList.toggle("sel", on);
+          panel.hidden = !on;
+        });
+        if (name === "account" && !devicesLoaded) { devicesLoaded = true; send({ type: "list_devices" }); }  // lazy-load environments
+      };
+      Object.keys(tabs).forEach((k) => {
+        const btn = tabs[k][0];
+        if (btn) btn.addEventListener("click", () => showTab(k));
+      });
     }
 
     if (!isYou) {
@@ -1627,55 +1621,6 @@
         document.getElementById("tagCancel").addEventListener("click", () => {
           send({ type: "profile", username: username });
         });
-      });
-    }
-
-    // ---- Rotate token: kill a leaked token without losing identity ----
-    // Confirms, POSTs the CURRENT token to /rotate, swaps in the new token, and
-    // keeps the live session working (no logout). The old token dies server-side
-    // the instant the swap lands. Distinct from recovery (which needs the phrase).
-    const rotateLink = document.getElementById("rotateToken");
-    if (rotateLink) {
-      rotateLink.addEventListener("click", () => {
-        if (rotateLink.classList.contains("busy")) return;
-        if (!token) return;
-        const ok = window.confirm(
-          "Rotate your token?\n\n" +
-          "Your CURRENT token stops working immediately on every device. " +
-          "This browser stays signed in with a fresh token. Use this if your " +
-          "token may have leaked.\n\n" +
-          "Note: your local agent hook still uses the old token — re-run the " +
-          "installer to re-wire it."
-        );
-        if (!ok) return;
-        rotateLink.classList.add("busy");
-        rotateLink.textContent = "rotating…";
-        fetch("/rotate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: token }),
-        })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((d) => {
-            if (d && typeof d.token === "string" && d.token) {
-              // Swap the secret in place; the open socket is already authed, so
-              // the session keeps working with no reconnect needed.
-              token = d.token;
-              try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
-              rotateLink.classList.remove("busy");
-              rotateLink.textContent = "token rotated ✓";
-              setTimeout(() => { rotateLink.textContent = "rotate token"; }, 2600);
-            } else {
-              rotateLink.classList.remove("busy");
-              rotateLink.textContent = "rotate failed — retry";
-              setTimeout(() => { rotateLink.textContent = "rotate token"; }, 2600);
-            }
-          })
-          .catch(() => {
-            rotateLink.classList.remove("busy");
-            rotateLink.textContent = "rotate failed — retry";
-            setTimeout(() => { rotateLink.textContent = "rotate token"; }, 2600);
-          });
       });
     }
 

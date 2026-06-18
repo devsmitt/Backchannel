@@ -42,7 +42,6 @@ import {
   deviceByTokenHash,
   listDevices,
   removeDevice,
-  removeDeviceByTokenHash,
   revokeAllDevices,
   touchDevice,
   deleteUser,
@@ -168,21 +167,43 @@ const limitClaim     = makeLimiter({ capacity: 5,   windowMs: 60 * 1000 });     
 const limitPairNew   = makeLimiter({ capacity: 10,  windowMs: 60 * 1000 });        // /pair/new per token-hash: 10/min
 const limitPairRedeem= makeLimiter({ capacity: 30,  windowMs: 60 * 1000 });        // /pair/redeem per IP: 30/min (guess guard)
 const limitPresence  = makeLimiter({ capacity: 120, windowMs: 60 * 1000 });        // /enter + /exit per token-hash combined: 120/min
-const limitRotate    = makeLimiter({ capacity: 5,   windowMs: 60 * 1000 });        // /rotate per token-hash: 5/min
+const limitVerify    = makeLimiter({ capacity: 30,  windowMs: 60 * 1000 });        // /verify per token-hash: 30/min
 const limitDelete    = makeLimiter({ capacity: 5,   windowMs: 60 * 1000 });        // /delete per token-hash: 5/min
 const limitSay       = makeLimiter({ capacity: 20,  windowMs: 10 * 1000 });        // WS 'say' per userId: 20 / 10s
 const limitUpload    = makeLimiter({ capacity: 12,  windowMs: 60 * 1000 });        // /upload per token-hash: 12/min
 const limitTyping    = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'typing' per userId: 40 / 10s
 
-const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitRotate, limitDelete, limitSay, limitUpload, limitTyping];
+const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitVerify, limitDelete, limitSay, limitUpload, limitTyping];
 
 // Extract the client IP. Behind Railway's proxy the real client is the FIRST
 // hop in X-Forwarded-For; fall back to the socket address when no proxy header.
 // A short, friendly label for a paired environment, inferred from the caller.
 // Browsers send a Mozilla UA; the installer's curl does not.
-function deviceLabel(req) {
+// A human name for a paired environment. The installer passes the real machine
+// hostname (e.g. "devons-mbp"); browsers send nothing, so we derive a friendly
+// name from the user-agent ("Chrome · macOS"). A supplied label always wins.
+function cleanLabel(s) {
+  if (typeof s !== 'string') return '';
+  return s.replace(/[^\w .·_-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+}
+function uaName(req) {
   const ua = String((req && req.headers && req.headers['user-agent']) || '');
-  return /mozilla|chrome|safari|firefox|edg/i.test(ua) ? 'browser' : 'cli';
+  if (!/mozilla|chrome|safari|firefox|edg/i.test(ua)) return 'terminal';
+  let br = 'browser';
+  if (/edg/i.test(ua)) br = 'Edge';
+  else if (/firefox|fxios/i.test(ua)) br = 'Firefox';
+  else if (/chrome|crios/i.test(ua)) br = 'Chrome';
+  else if (/safari/i.test(ua)) br = 'Safari';
+  let os = '';
+  if (/iphone|ipad|ipod/i.test(ua)) os = 'iOS';
+  else if (/mac os x|macintosh/i.test(ua)) os = 'macOS';
+  else if (/windows/i.test(ua)) os = 'Windows';
+  else if (/android/i.test(ua)) os = 'Android';
+  else if (/linux/i.test(ua)) os = 'Linux';
+  return os ? (br + ' · ' + os) : br;
+}
+function deviceLabel(req, supplied) {
+  return cleanLabel(supplied) || uaName(req);
 }
 
 function clientIp(req) {
@@ -628,7 +649,7 @@ const server = http.createServer(async (req, res) => {
     if (!username || !token || !recovery) { sendJson(res, 400, { error: 'bad request' }); return; }
     if (!code) { sendJson(res, 403, { error: 'invite', reason: 'missing' }); return; }
 
-    const result = claimWithInvite(username, sha256(token), sha256(recovery), code, deviceLabel(req));
+    const result = claimWithInvite(username, sha256(token), sha256(recovery), code, deviceLabel(req, body && body.label));
     if (result.ok) {
       sendJson(res, 200, { ok: true, username: result.username, invites: result.invites });
     } else if (result.error === 'taken') {
@@ -657,8 +678,8 @@ const server = http.createServer(async (req, res) => {
     const user = userByName(username);
     if (!user || user.recovery_hash !== sha256(recovery)) { sendJson(res, 403, { error: 'no match' }); return; }
     try {
-      revokeAllDevices(user.id);                                   // wipe every environment
-      addDeviceToken(user.id, sha256(newToken), deviceLabel(req)); // and pair this one fresh
+      revokeAllDevices(user.id);                                                  // wipe every environment
+      addDeviceToken(user.id, sha256(newToken), deviceLabel(req, body && body.label)); // and pair this one fresh
       sendJson(res, 200, { ok: true });
     } catch (e) {
       console.error('[backchannel] recover:', e);
@@ -667,35 +688,24 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- Rotate THIS environment's token (kill a leaked token) -------------
-  // {token} -> if it resolves to a user, retire just this device's token and add
-  // a fresh one, returning 200 {token:<new>}. Other paired environments are
-  // untouched. Distinct from /recover (which needs the phrase and wipes all).
-  if (method === 'POST' && urlPath === '/rotate') {
+  // --- Verify a token is still live -------------------------------------
+  // {token} -> 200 {ok:true} if it resolves to a paired environment, else 401.
+  // Used by the installer to detect a token that was revoked remotely (e.g. by a
+  // recovery on another machine) so it can re-pair instead of re-wiring a dead
+  // token. Knowing a token is invalid leaks nothing; using it requires the secret.
+  if (method === 'POST' && urlPath === '/verify') {
     const parsed = await readJsonBody(req);
     if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
     const body = parsed.body;
     const token = body && typeof body.token === 'string' ? body.token.trim() : '';
     if (!token) { sendJson(res, 400, { error: 'bad request' }); return; }
-    const oldHash = sha256(token);
-    if (!limitRotate.allow(oldHash) || !limitRotate.allow('ip:' + clientIp(req))) {
+    const tokenHash = sha256(token);
+    if (!limitVerify.allow(tokenHash) || !limitVerify.allow('ip:' + clientIp(req))) {
       sendJson(res, 429, { error: 'rate limited' }); return;
     }
-    const user = userByTokenHash(oldHash);
+    const user = userByTokenHash(tokenHash);
     if (!user) { sendJson(res, 401, { error: 'unauthorized' }); return; }
-    let attempts = 0;
-    while (attempts++ < 5) {
-      const next = crypto.randomBytes(32).toString('hex');
-      try {
-        addDeviceToken(user.id, sha256(next), deviceLabel(req));
-        removeDeviceByTokenHash(oldHash);   // retire the old one only after the new lands
-        sendJson(res, 200, { token: next });
-        return;
-      } catch {
-        // UNIQUE collision on token_hash — try a different secret.
-      }
-    }
-    sendJson(res, 500, { error: 'rotate failed' });
+    sendJson(res, 200, { ok: true, username: user.username });
     return;
   }
 
@@ -791,7 +801,7 @@ const server = http.createServer(async (req, res) => {
     while (attempts++ < 5) {
       const next = crypto.randomBytes(32).toString('hex');
       try {
-        addDeviceToken(rec.userId, sha256(next), deviceLabel(req));
+        addDeviceToken(rec.userId, sha256(next), deviceLabel(req, body && body.label));
         sendJson(res, 200, { token: next });
         return;
       } catch { /* token-hash collision — retry */ }
