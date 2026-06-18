@@ -991,17 +991,20 @@ function canAccessRoom(userId, room) {
 // are (a) subscribed to the slug AND (b) belong to a member. We tag `self`
 // per-recipient so the client can style the sender's own lines.
 function broadcastMessage(room, senderUserId, payload) {
+  // Deliver to every ELIGIBLE recipient — channels: all authed sockets; dm/group:
+  // members only — NOT just those currently viewing the room. The client appends
+  // it if you're in that room, otherwise bumps its unread badge + the tab title,
+  // so DMs and other channels light up live (no reload needed).
   let allowed = null;
   if (room.type !== 'channel') allowed = new Set(roomMemberIds(room.id));
   for (const ws of wss.clients) {
     if (ws.readyState !== ws.OPEN || !ws.userId) continue;
-    if (ws.room !== room.slug) continue;
     if (allowed && !allowed.has(ws.userId)) continue;
     try {
       ws.send(JSON.stringify({ ...payload, self: ws.userId === senderUserId }));
-      // This socket is actively viewing the room, so the line lands already read —
-      // advance its cursor so a later reload doesn't resurface it as unread.
-      if (payload.id) markRead(ws.userId, room.id, payload.id);
+      // Only a socket actively viewing the room has "read" the line — advance its
+      // cursor so a later reload doesn't resurface it as unread.
+      if (ws.room === room.slug && payload.id) markRead(ws.userId, room.id, payload.id);
     } catch { /* a peer dying mid-broadcast must not abort the rest */ }
   }
 }
@@ -1228,13 +1231,17 @@ wss.on('connection', (ws) => {
       // The opener is actively opening it, so un-hide it for them.
       setArchived(room.id, ws.userId, false);
 
-      const payload = { type: 'room_opened', room: { id: room.id, slug: room.slug, name: room.name, type: room.type, members: room.members } };
+      const room0 = { id: room.id, slug: room.slug, name: room.name, type: room.type, members: room.members };
       // Surface it in each connected member's rail — but NOT for members who have
       // it archived (other than the opener): their hidden chats stay hidden, they
-      // still receive the messages and see them when they open that area.
+      // still receive the messages and see them when they open that area. Only the
+      // OPENER is focused into it (focus:true) — recipients aren't yanked away
+      // from what they're reading; the DM just appears in their rail.
       const memberIds = new Set(roomMemberIds(room.id));
       for (const mid of memberIds) {
-        if (mid === ws.userId || !isArchivedFor(room.id, mid)) pushToUser(mid, payload);
+        if (mid === ws.userId || !isArchivedFor(room.id, mid)) {
+          pushToUser(mid, { type: 'room_opened', room: room0, focus: mid === ws.userId });
+        }
       }
       return;
     }

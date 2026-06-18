@@ -1094,7 +1094,7 @@
         case "history":      renderHistory(m.room, m.messages); break;
         case "msg":          onMsg(m); break;
         case "typing":       onTyping(m); break;
-        case "room_opened":  onRoomOpened(m.room); break;
+        case "room_opened":  onRoomOpened(m.room, m.focus); break;
         case "dms":          onDms(m); break;
         case "profile_data": onProfileData(m.user); break;
         case "denied":       break;  // sent while not present; ignore quietly
@@ -1163,7 +1163,7 @@
     }
   }
 
-  function onRoomOpened(room) {
+  function onRoomOpened(room, focus) {
     if (!room) return;
     const key = roomKey(room);   // slug — consistent with channels + the server's msg.room
     // opening it makes it active — pull it out of archived if it was there
@@ -1172,7 +1172,9 @@
       dms.push(room);
       renderDms();
     }
-    joinRoom(key);
+    // Only the opener jumps into it. A recipient just gets it in their rail
+    // (and a live unread badge when messages arrive) — never yanked away.
+    if (focus) joinRoom(key);
   }
 
   // Server pushed fresh dm lists after an archive/unarchive.
