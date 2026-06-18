@@ -205,8 +205,9 @@
   .daydiv { display: flex; align-items: center; gap: 14px; margin: 6px 0 16px; color: var(--ghost); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; }
   .daydiv::before, .daydiv::after { content: ""; height: 1px; background: var(--line); flex: 1; }
 
-  .msg { padding: 8px 0 2px; position: relative; }
-  .msg.cont { padding: 1px 0 2px; }
+  /* right gutter reserves room for the absolute "+" so wrapped text never runs under it */
+  .msg { padding: 8px 38px 2px 0; position: relative; }
+  .msg.cont { padding: 1px 38px 2px 0; }
   .msg .name { font-family: var(--mono); font-size: 12.5px; color: var(--dim); margin-bottom: 3px; }
   .msg .name .nm { cursor: pointer; }
   .msg .name .nm:hover { text-decoration: underline; }
@@ -227,11 +228,12 @@
   .rxn .rxn-e { font-size: 12.5px; }
   .rxn .rxn-n { font-family: var(--mono); font-size: 11px; color: var(--faint); }
   .rxn.on .rxn-n { color: var(--live); }
-  .rxn-add { position: absolute; top: 4px; right: 0; width: 26px; height: 22px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--faint); cursor: pointer; opacity: 0; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease; }
+  .rxn-add { position: absolute; top: 4px; right: 4px; width: 26px; height: 22px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--faint); cursor: pointer; opacity: 0; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease; }
   .rxn-add::before { content: "+"; font-size: 15px; line-height: 1; }
   .msg:hover .rxn-add { opacity: 0.6; }
   .rxn-add:hover { opacity: 1; color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent); }
   .rxn-picker { position: fixed; z-index: 60; display: flex; gap: 2px; padding: 6px; background: var(--rail); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 14px 36px rgba(0,0,0,0.45); }
+  .rxn-picker[hidden] { display: none; }   /* the class sets display:flex, which would otherwise defeat the hidden attribute */
   .rxn-pick { background: none; border: none; cursor: pointer; font-size: 18px; line-height: 1; padding: 5px 6px; border-radius: 7px; transition: background 100ms ease, transform 100ms ease; }
   .rxn-pick:hover { background: var(--hover); transform: scale(1.18); }
 
