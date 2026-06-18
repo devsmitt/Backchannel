@@ -64,6 +64,10 @@ import {
   recentMessages,
   pruneOldMessages,
   latestMessageId,
+  toggleReaction,
+  reactionsForMessage,
+  reactionsForMessages,
+  messageById,
   markRead,
   unreadCountsForUser,
   UPLOAD_DIR,
@@ -103,6 +107,10 @@ const BUILD_CAP_MS = Number(process.env.BUILD_CAP) || 2 * 60 * 60 * 1000;
 
 const MAX_BODY_LEN = 1000;              // hard cap on a chat line.
 const HISTORY_LIMIT = 50;               // backlog returned on room entry.
+// Fixed reaction palette — the client offers exactly these, the server accepts
+// only these. A closed set keeps the data clean and the UI tidy.
+const REACTIONS = ['👍', '🔥', '🎉', '👀', '❤️', '😂', '🙌', '🚀'];
+const REACTION_SET = new Set(REACTIONS);
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES) || 5 * 1024 * 1024; // 5MB image ceiling.
 // A stored image path is ALWAYS of the form /uploads/<file> where <file> is the
 // random name we minted. The client must never be able to point this at anything
@@ -172,8 +180,9 @@ const limitDelete    = makeLimiter({ capacity: 5,   windowMs: 60 * 1000 });     
 const limitSay       = makeLimiter({ capacity: 20,  windowMs: 10 * 1000 });        // WS 'say' per userId: 20 / 10s
 const limitUpload    = makeLimiter({ capacity: 12,  windowMs: 60 * 1000 });        // /upload per token-hash: 12/min
 const limitTyping    = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'typing' per userId: 40 / 10s
+const limitReact     = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'react' per userId: 40 / 10s
 
-const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitVerify, limitDelete, limitSay, limitUpload, limitTyping];
+const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitVerify, limitDelete, limitSay, limitUpload, limitTyping, limitReact];
 
 // Extract the client IP. Behind Railway's proxy the real client is the FIRST
 // hop in X-Forwarded-For; fall back to the socket address when no proxy header.
@@ -1014,10 +1023,40 @@ function privateRoomPayloads(userId) {
 }
 
 // Send the last-50 history of a room to one socket (oldest first).
+// Reaction rows [{user_id, emoji}] -> ordered [{emoji, count}] in palette order.
+function reactionSummary(rows) {
+  const counts = new Map();
+  for (const r of rows) counts.set(r.emoji, (counts.get(r.emoji) || 0) + 1);
+  return REACTIONS.filter((e) => counts.has(e)).map((e) => ({ emoji: e, count: counts.get(e) }));
+}
+
 function sendHistory(ws, room) {
   const rows = recentMessages(room.id, HISTORY_LIMIT);
-  const messages = rows.map((m) => ({ id: m.id, username: m.username, body: m.body, image: m.image || null, ts: m.created_at }));
+  const reactByMsg = reactionsForMessages(rows.map((m) => m.id));
+  const messages = rows.map((m) => {
+    const rr = reactByMsg[m.id] || [];
+    return {
+      id: m.id, username: m.username, body: m.body, image: m.image || null, ts: m.created_at,
+      reactions: reactionSummary(rr),
+      mine: rr.filter((r) => r.user_id === ws.userId).map((r) => r.emoji),
+    };
+  });
   try { ws.send(JSON.stringify({ type: 'history', room: room.slug, messages })); } catch { /* harmless */ }
+}
+
+// Broadcast one message's full reaction state to the room's eligible recipients.
+// Per-recipient `mine` so each client knows which emoji it owns on that message.
+function broadcastReaction(room, messageId) {
+  const rows = reactionsForMessage(messageId);
+  const summary = reactionSummary(rows);
+  let allowed = null;
+  if (room.type !== 'channel') allowed = new Set(roomMemberIds(room.id));
+  for (const ws of wss.clients) {
+    if (ws.readyState !== ws.OPEN || !ws.userId) continue;
+    if (allowed && !allowed.has(ws.userId)) continue;
+    const mine = rows.filter((r) => r.user_id === ws.userId).map((r) => r.emoji);
+    try { ws.send(JSON.stringify({ type: 'reaction', room: room.slug, messageId, reactions: summary, mine })); } catch { /* harmless */ }
+  }
 }
 
 // Can this user see/speak in this room? Channels: always. dm/group: membership.
@@ -1236,6 +1275,23 @@ wss.on('connection', (ws) => {
       else if (typeof ref === 'string') room = roomBySlug(ref.trim()) || roomById(Number(ref));
       if (!room || !canAccessRoom(ws.userId, room)) return;
       setTyping(room, ws.userId, ws.username, !!msg.state);
+      return;
+    }
+
+    // --- react: toggle one emoji reaction on a message -------------------
+    if (msg.type === 'react') {
+      if (!ws.userId) return;
+      if (!limitReact.allow(ws.userId)) return;            // silently drop floods
+      if (!isPresent(ws.userId)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
+      const emoji = typeof msg.emoji === 'string' ? msg.emoji : '';
+      const messageId = Number(msg.messageId);
+      if (!REACTION_SET.has(emoji) || !messageId) return;   // closed palette only
+      const m = messageById(messageId);
+      if (!m) return;
+      const room = roomById(m.room_id);
+      if (!room || !canAccessRoom(ws.userId, room)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
+      toggleReaction(messageId, ws.userId, emoji);
+      broadcastReaction(room, messageId);
       return;
     }
 

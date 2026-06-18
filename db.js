@@ -137,10 +137,22 @@ db.exec(`
     used_at    INTEGER
   );
 
+  -- Emoji reactions on messages. One row per (message, user, emoji) so a user
+  -- can add several distinct emoji but not the same one twice. Cleaned up when a
+  -- message is deleted or pruned.
+  CREATE TABLE IF NOT EXISTS reactions (
+    message_id INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL,
+    emoji      TEXT NOT NULL,
+    created_at INTEGER,
+    PRIMARY KEY (message_id, user_id, emoji)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id, id);
   CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_invites_owner ON invites(owner_id);
   CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
+  CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);
 `);
 
 // One-time: seed device_tokens from the legacy single users.token_hash so existing
@@ -297,6 +309,23 @@ const stmtRecentMessages = db.prepare(
 );
 const stmtMaxMsgId = db.prepare(
   'SELECT COALESCE(MAX(id), 0) AS m FROM messages WHERE room_id = ?'
+);
+const stmtAddReaction = db.prepare(
+  'INSERT OR IGNORE INTO reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)'
+);
+const stmtDelReaction = db.prepare(
+  'DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?'
+);
+const stmtHasReaction = db.prepare(
+  'SELECT 1 FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?'
+);
+const stmtReactionsForMessage = db.prepare(
+  'SELECT user_id, emoji FROM reactions WHERE message_id = ? ORDER BY created_at ASC'
+);
+const stmtMessageById = db.prepare('SELECT id, room_id, user_id, username FROM messages WHERE id = ?');
+const stmtDelReactionsForMessage = db.prepare('DELETE FROM reactions WHERE message_id = ?');
+const stmtPruneOrphanReactions = db.prepare(
+  'DELETE FROM reactions WHERE message_id NOT IN (SELECT id FROM messages)'
 );
 const stmtGetRead = db.prepare(
   'SELECT last_read_id FROM room_reads WHERE user_id = ? AND room_id = ?'
@@ -831,6 +860,49 @@ export function recentMessages(roomId, limit) {
 }
 
 /**
+ * Toggle one emoji reaction by one user on one message. Returns { added: bool }
+ * — true if it was just added, false if an existing reaction was removed.
+ */
+export function toggleReaction(messageId, userId, emoji, now = Date.now()) {
+  if (stmtHasReaction.get(messageId, userId, emoji)) {
+    stmtDelReaction.run(messageId, userId, emoji);
+    return { added: false };
+  }
+  stmtAddReaction.run(messageId, userId, emoji, now);
+  return { added: true };
+}
+
+/** A single message row { id, room_id, user_id, username } or undefined. */
+export function messageById(messageId) {
+  return stmtMessageById.get(messageId);
+}
+
+/** Raw reaction rows for one message: [{ user_id, emoji }], oldest first. */
+export function reactionsForMessage(messageId) {
+  return stmtReactionsForMessage.all(messageId);
+}
+
+/**
+ * Reaction rows for many messages at once, grouped by message id:
+ * { [messageId]: [{ user_id, emoji }, ...] }. Empty object for no ids.
+ */
+export function reactionsForMessages(ids) {
+  const out = {};
+  if (!Array.isArray(ids) || !ids.length) return out;
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT message_id, user_id, emoji FROM reactions WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
+  ).all(...ids);
+  for (const r of rows) (out[r.message_id] || (out[r.message_id] = [])).push({ user_id: r.user_id, emoji: r.emoji });
+  return out;
+}
+
+/** Drop all reactions on a message (when the message itself is removed). */
+export function deleteReactionsForMessage(messageId) {
+  stmtDelReactionsForMessage.run(messageId);
+}
+
+/**
  * Prune channel messages older than the retention window, AND unlink the image
  * files those messages were carrying (so retention frees disk, not just rows).
  * DMs/groups are never touched. Returns rows deleted.
@@ -842,6 +914,7 @@ export function pruneOldMessages(retentionMs = RETENTION_MS, now = Date.now()) {
   try { images = stmtPrunableImages.all(cutoff).map((r) => r.image).filter(Boolean); }
   catch (e) { /* fall through — never let file cleanup block row pruning */ }
   const changes = stmtPruneMessages.run(cutoff).changes;
+  try { stmtPruneOrphanReactions.run(); } catch (e) { /* never block pruning */ }
   for (const url of images) {
     // url is '/uploads/<file>' — resolve to a basename inside UPLOAD_DIR only.
     const file = path.basename(String(url));

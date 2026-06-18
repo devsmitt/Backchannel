@@ -219,6 +219,22 @@
   .msg .text pre.code { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 6px 0 4px; overflow-x: auto; white-space: pre; scrollbar-width: thin; }
   .msg .text pre.code code { background: none; border: none; padding: 0; font-size: 12.5px; }
 
+  /* reactions: subtle chips under a message; the + add affordance reveals on hover */
+  .msg .rxns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 5px; }
+  .rxn { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 11px; background: var(--surface); border: 1px solid var(--line); cursor: pointer; line-height: 1.4; color: var(--dim); transition: background 120ms ease, border-color 120ms ease; }
+  .rxn:hover { border-color: var(--ghost); }
+  .rxn.on { background: color-mix(in srgb, var(--live) 14%, transparent); border-color: color-mix(in srgb, var(--live) 45%, transparent); }
+  .rxn .rxn-e { font-size: 12.5px; }
+  .rxn .rxn-n { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .rxn.on .rxn-n { color: var(--live); }
+  .rxn-add { width: 26px; height: 22px; border-radius: 11px; border: 1px solid var(--line); background: none; color: var(--faint); cursor: pointer; opacity: 0; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease; }
+  .rxn-add::before { content: "+"; font-size: 15px; line-height: 1; }
+  .msg:hover .rxn-add { opacity: 0.55; }
+  .rxn-add:hover { opacity: 1; color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent); }
+  .rxn-picker { position: fixed; z-index: 60; display: flex; gap: 2px; padding: 6px; background: var(--rail); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 14px 36px rgba(0,0,0,0.45); }
+  .rxn-pick { background: none; border: none; cursor: pointer; font-size: 18px; line-height: 1; padding: 5px 6px; border-radius: 7px; transition: background 100ms ease, transform 100ms ease; }
+  .rxn-pick:hover { background: var(--hover); transform: scale(1.18); }
+
   .convo-empty { color: var(--faint); font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.04em; padding: 8px 0; }
 
   .compose { border-top: 1px solid var(--line); padding: 14px 40px; }
@@ -445,6 +461,8 @@
     .peoplemenu { left: 0; right: 0; top: 100%; min-width: 0; max-width: none; border-radius: 0 0 12px 12px; border-left: none; border-right: none; }
     /* roomier tap targets + a tighter wordmark so small phones don't crowd */
     .roommenu .rm-item, .peoplemenu .pm-item { padding: 11px 12px; }
+    /* no hover on touch — keep the add-reaction affordance visible */
+    .rxn-add { opacity: 0.5; }
     .wordmark { font-size: 12px; letter-spacing: 0.18em; }
     .roomswitch .rt { padding: 6px 10px; }
   }
@@ -1095,8 +1113,9 @@
   document.addEventListener("click", (e) => {
     if (roomMenuEl && !roomMenuEl.hidden && !roomMenuEl.contains(e.target) && !roomTitleEl.contains(e.target)) closeRoomMenu();
     if (peopleMenuEl && !peopleMenuEl.hidden && !peopleMenuEl.contains(e.target) && !(nowCountBtnEl && nowCountBtnEl.contains(e.target))) closePeopleMenu();
+    if (reactionPickerEl && !reactionPickerEl.hidden && !reactionPickerEl.contains(e.target)) closeReactionPicker();
   });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeRoomMenu(); closePeopleMenu(); } });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeRoomMenu(); closePeopleMenu(); closeReactionPicker(); } });
 
   // ---- Rendering messages -------------------------------------------------
   function clearStream() { streamColEl.innerHTML = ""; lastSender = null; }
@@ -1106,6 +1125,7 @@
     const row = document.createElement("div");
     row.className = "msg" + (cont ? " cont" : "") + (isSelf ? " self" : "");
     row.dataset.user = m.username;   // so recolorStream can repaint by author
+    if (m.id != null) row.dataset.mid = String(m.id);
     if (!cont) {
       const nameEl = document.createElement("div");
       nameEl.className = "name";
@@ -1139,9 +1159,70 @@
       a.appendChild(img);
       row.appendChild(a);
     }
+    renderReactions(row, m.reactions, m.mine);
     streamColEl.appendChild(row);
     lastSender = m.username;
   }
+
+  // ---- Reactions ----------------------------------------------------------
+  const REACTION_PALETTE = ['👍', '🔥', '🎉', '👀', '❤️', '😂', '🙌', '🚀'];
+  function msgRowById(id) { return streamColEl.querySelector('.msg[data-mid="' + String(id) + '"]'); }
+  function sendReact(mid, emoji) { if (present && mid != null) send({ type: "react", messageId: Number(mid), emoji: emoji }); }
+
+  function renderReactions(row, reactions, mine) {
+    if (!row) return;
+    let wrap = row.querySelector(".rxns");
+    if (!wrap) { wrap = document.createElement("div"); wrap.className = "rxns"; row.appendChild(wrap); }
+    wrap.innerHTML = "";
+    const mineSet = new Set(mine || []);
+    (reactions || []).forEach((r) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "rxn" + (mineSet.has(r.emoji) ? " on" : "");
+      b.innerHTML = '<span class="rxn-e">' + r.emoji + '</span><span class="rxn-n">' + esc(String(r.count)) + '</span>';
+      b.addEventListener("click", (e) => { e.stopPropagation(); sendReact(row.dataset.mid, r.emoji); });
+      wrap.appendChild(b);
+    });
+    const add = document.createElement("button");
+    add.type = "button"; add.className = "rxn-add"; add.title = "add reaction";
+    add.setAttribute("aria-label", "add reaction");
+    add.addEventListener("click", (e) => { e.stopPropagation(); openReactionPicker(add, row.dataset.mid); });
+    wrap.appendChild(add);
+  }
+
+  function onReaction(m) {
+    const row = msgRowById(m.messageId);
+    if (row) renderReactions(row, m.reactions, m.mine);
+  }
+
+  // tiny emoji popover, one shared instance
+  let reactionPickerEl = null, reactionPickerMid = null;
+  function ensureReactionPicker() {
+    if (reactionPickerEl) return reactionPickerEl;
+    const el = document.createElement("div");
+    el.className = "rxn-picker"; el.hidden = true;
+    REACTION_PALETTE.forEach((emoji) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "rxn-pick"; b.textContent = emoji;
+      b.addEventListener("click", (e) => { e.stopPropagation(); if (reactionPickerMid != null) sendReact(reactionPickerMid, emoji); closeReactionPicker(); });
+      el.appendChild(b);
+    });
+    document.body.appendChild(el);
+    reactionPickerEl = el;
+    return el;
+  }
+  function openReactionPicker(anchor, mid) {
+    const el = ensureReactionPicker();
+    reactionPickerMid = mid;
+    el.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    const ew = el.offsetWidth, eh = el.offsetHeight;
+    let top = r.top - eh - 6;
+    if (top < 8) top = r.bottom + 6;
+    let left = Math.max(8, Math.min(r.left, window.innerWidth - ew - 8));
+    el.style.left = left + "px"; el.style.top = top + "px";
+  }
+  function closeReactionPicker() { if (reactionPickerEl) { reactionPickerEl.hidden = true; reactionPickerMid = null; } }
 
   function scrollBottom() { streamEl.scrollTop = streamEl.scrollHeight; }
 
@@ -1193,6 +1274,7 @@
         case "roster":       renderRoster(m); break;
         case "history":      renderHistory(m.room, m.messages); break;
         case "msg":          onMsg(m); break;
+        case "reaction":     onReaction(m); break;
         case "typing":       onTyping(m); break;
         case "room_opened":  onRoomOpened(m.room, m.focus); break;
         case "dms":          onDms(m); break;
