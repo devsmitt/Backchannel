@@ -201,6 +201,8 @@ function migrate() {
 
   // messages: optional image attachment (a /uploads/<file> path).
   addColumnIfMissing('messages', 'image', 'image TEXT');
+  // messages: optional GIF attachment (a Tenor media URL).
+  addColumnIfMissing('messages', 'gif', 'gif TEXT');
 
   // room_members: per-user "archived" flag for hiding DMs/groups.
   addColumnIfMissing('room_members', 'archived', 'archived INTEGER NOT NULL DEFAULT 0');
@@ -302,10 +304,10 @@ const stmtSetTagline = db.prepare('UPDATE users SET tagline = ? WHERE id = ?');
 const stmtSetColor = db.prepare('UPDATE users SET color = ? WHERE id = ?');
 
 const stmtInsertMessage = db.prepare(
-  'INSERT INTO messages (room_id, user_id, username, body, image, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  'INSERT INTO messages (room_id, user_id, username, body, image, gif, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
 );
 const stmtRecentMessages = db.prepare(
-  'SELECT id, username, body, image, created_at FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT ?'
+  'SELECT id, username, body, image, gif, created_at FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT ?'
 );
 const stmtMaxMsgId = db.prepare(
   'SELECT COALESCE(MAX(id), 0) AS m FROM messages WHERE room_id = ?'
@@ -845,9 +847,9 @@ export function findOrCreatePrivateRoom(memberIds) {
  * Persist a chat line. `image` is an optional /uploads/<file> path for an image
  * attachment (null for a plain text line). Returns { id, created_at }.
  */
-export function insertMessage(roomId, userId, username, body, image = null) {
+export function insertMessage(roomId, userId, username, body, image = null, gif = null) {
   const createdAt = Date.now();
-  const info = stmtInsertMessage.run(roomId, userId, username, body, image || null, createdAt);
+  const info = stmtInsertMessage.run(roomId, userId, username, body, image || null, gif || null, createdAt);
   return { id: info.lastInsertRowid, created_at: createdAt };
 }
 

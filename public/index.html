@@ -235,6 +235,25 @@
   .rxn-pick { background: none; border: none; cursor: pointer; font-size: 18px; line-height: 1; padding: 5px 6px; border-radius: 7px; transition: background 100ms ease, transform 100ms ease; }
   .rxn-pick:hover { background: var(--hover); transform: scale(1.18); }
 
+  /* GIF picker dialog (Tenor) */
+  .gifdialog-bg { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .gifdialog-bg[hidden] { display: none; }
+  .gifdialog { width: 100%; max-width: 460px; max-height: 76vh; display: flex; flex-direction: column; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: 0 18px 48px rgba(0,0,0,0.5); }
+  .gifbar { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; border-bottom: 1px solid var(--line); }
+  #gifSearch { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: var(--text); font: inherit; font-size: 13.5px; padding: 9px 11px; outline: none; }
+  #gifSearch:focus { border-color: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 12%, transparent); }
+  #gifSearch::placeholder { color: var(--faint); }
+  .gifx { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 7px; background: none; border: none; color: var(--faint); font-size: 20px; line-height: 1; cursor: pointer; }
+  .gifx:hover { color: var(--text); background: var(--hover); }
+  .gifgrid { flex: 1; overflow-y: auto; scrollbar-width: thin; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 10px; }
+  .gifcell { padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; background: var(--surface); aspect-ratio: 1 / 1; }
+  .gifcell:hover { border-color: var(--live); }
+  .gifcell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .gifnote { grid-column: 1 / -1; color: var(--faint); font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; text-align: center; padding: 24px 0; }
+  .giffoot { padding: 8px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ghost); text-align: right; }
+  .msgimg.gif { max-height: 220px; }
+  @media (max-width: 720px) { .gifgrid { grid-template-columns: repeat(2, 1fr); } }
+
   .convo-empty { color: var(--faint); font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.04em; padding: 8px 0; }
 
   .compose { border-top: 1px solid var(--line); padding: 14px 40px; }
@@ -254,6 +273,8 @@
   .compose .attach svg { width: 18px; height: 18px; }
   .compose .attach:hover { color: var(--live); }
   .compose .attach.busy { color: var(--ghost); cursor: default; }
+  .compose .gifbtn { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; color: var(--faint); background: none; border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; cursor: pointer; line-height: 1.2; }
+  .compose .gifbtn:hover { color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent); }
   /* pending attachment chip — shown above the input until the message is sent */
   .compose .attachpreview:not([hidden]) { display: flex; }
   .compose .attachpreview .thumb { position: relative; display: inline-block; }
@@ -536,7 +557,7 @@
           <div class="col" id="streamCol"></div>
         </div>
 
-        <div class="compose"><div class="col"><div class="attachpreview" id="attachPreview" hidden></div><div class="inputrow"><button class="attach" id="attachBtn" type="button" title="attach an image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button><span class="caret">›</span><input id="say" maxlength="1000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="message…" /><span class="typing" id="typingline"></span></div></div><input type="file" id="fileInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden /></div>
+        <div class="compose"><div class="col"><div class="attachpreview" id="attachPreview" hidden></div><div class="inputrow"><button class="attach" id="attachBtn" type="button" title="attach an image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button><button class="gifbtn" id="gifBtn" type="button" title="add a GIF">GIF</button><span class="caret">›</span><input id="say" maxlength="1000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="message…" /><span class="typing" id="typingline"></span></div></div><input type="file" id="fileInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden /></div>
       </main>
     </div>
   </div>
@@ -620,6 +641,18 @@
   <!-- ============================== PROFILE OVERLAY ============================== -->
   <div class="overlay-bg" id="profileOverlay">
     <div class="profile" id="profileCard"><!-- injected --></div>
+  </div>
+
+  <!-- ============================== GIF PICKER (Tenor) ============================== -->
+  <div class="gifdialog-bg" id="gifDialog" hidden>
+    <div class="gifdialog">
+      <div class="gifbar">
+        <input id="gifSearch" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="search GIFs…" />
+        <button class="gifx" id="gifClose" type="button" aria-label="close">×</button>
+      </div>
+      <div class="gifgrid" id="gifGrid"></div>
+      <div class="giffoot">via Tenor</div>
+    </div>
   </div>
 
 <script>
@@ -1130,7 +1163,7 @@
   document.addEventListener("touchstart", maybeCloseReactionPicker, true);
   // Scrolling the stream detaches the (fixed) picker from its anchor — close it.
   if (streamEl) streamEl.addEventListener("scroll", () => closeReactionPicker(), { passive: true });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeRoomMenu(); closePeopleMenu(); closeReactionPicker(); } });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeRoomMenu(); closePeopleMenu(); closeReactionPicker(); closeGifDialog(); } });
 
   // ---- Rendering messages -------------------------------------------------
   function clearStream() { streamColEl.innerHTML = ""; lastSender = null; }
@@ -1169,6 +1202,18 @@
       img.className = "msgimg"; img.src = m.image; img.alt = "image"; img.loading = "lazy";
       img.addEventListener("load", () => {
         // keep the view pinned to the latest if we were already at the bottom
+        if (streamEl.scrollTop + streamEl.clientHeight >= streamEl.scrollHeight - 80) scrollBottom();
+      });
+      a.appendChild(img);
+      row.appendChild(a);
+    }
+    // GIF attachment: only a Tenor media URL (host allow-listed) is rendered.
+    if (m.gif && /^https:\/\/media\d*\.tenor\.com\/[\w\-/.]+\.gif$/i.test(m.gif)) {
+      const a = document.createElement("a");
+      a.href = m.gif; a.target = "_blank"; a.rel = "noopener noreferrer";
+      const img = document.createElement("img");
+      img.className = "msgimg gif"; img.src = m.gif; img.alt = "gif"; img.loading = "lazy";
+      img.addEventListener("load", () => {
         if (streamEl.scrollTop + streamEl.clientHeight >= streamEl.scrollHeight - 80) scrollBottom();
       });
       a.appendChild(img);
@@ -1247,6 +1292,60 @@
     el.style.left = left + "px"; el.style.top = top + "px";
   }
   function closeReactionPicker() { if (reactionPickerEl) { reactionPickerEl.hidden = true; reactionPickerMid = null; } }
+
+  // ---- GIF picker (Tenor, proxied through our server) ----------------------
+  const gifBtn       = document.getElementById("gifBtn");
+  const gifDialogEl  = document.getElementById("gifDialog");
+  const gifSearchEl  = document.getElementById("gifSearch");
+  const gifGridEl    = document.getElementById("gifGrid");
+  const gifCloseEl   = document.getElementById("gifClose");
+  let gifSearchTimer = null, gifReqSeq = 0;
+
+  function openGifDialog() {
+    if (!present || !gifDialogEl) return;
+    gifDialogEl.hidden = false;
+    if (gifSearchEl) gifSearchEl.value = "";
+    loadGifs("");   // featured/trending to start
+    setTimeout(() => { try { gifSearchEl.focus(); } catch (_) {} }, 40);
+  }
+  function closeGifDialog() { if (gifDialogEl) gifDialogEl.hidden = true; }
+
+  function loadGifs(q) {
+    if (!gifGridEl) return;
+    const seq = ++gifReqSeq;
+    gifGridEl.innerHTML = '<div class="gifnote">loading…</div>';
+    const url = (q && q.trim()) ? ("/gif/search?q=" + encodeURIComponent(q.trim())) : "/gif/featured";
+    fetch(url, { headers: { "x-bc-token": token } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (seq === gifReqSeq) renderGifs(d && d.results); })
+      .catch(() => { if (seq === gifReqSeq) gifGridEl.innerHTML = '<div class="gifnote">couldn’t load GIFs</div>'; });
+  }
+  function renderGifs(results) {
+    gifGridEl.innerHTML = "";
+    const list = results || [];
+    if (!list.length) { gifGridEl.innerHTML = '<div class="gifnote">no GIFs found</div>'; return; }
+    list.forEach((g) => {
+      if (!g || !g.preview || !g.gif) return;
+      const cell = document.createElement("button");
+      cell.type = "button"; cell.className = "gifcell";
+      const img = document.createElement("img");
+      img.src = g.preview; img.alt = g.alt || "gif"; img.loading = "lazy";
+      cell.appendChild(img);
+      cell.addEventListener("click", () => { sendGif(g.gif); closeGifDialog(); });
+      gifGridEl.appendChild(cell);
+    });
+  }
+  function sendGif(url) {
+    if (!present || !currentRoom || !url) return;
+    send({ type: "say", room: currentRoom, gif: url });
+  }
+  if (gifBtn) gifBtn.addEventListener("click", (e) => { e.stopPropagation(); openGifDialog(); });
+  if (gifCloseEl) gifCloseEl.addEventListener("click", closeGifDialog);
+  if (gifDialogEl) gifDialogEl.addEventListener("click", (e) => { if (e.target === gifDialogEl) closeGifDialog(); });
+  if (gifSearchEl) gifSearchEl.addEventListener("input", () => {
+    clearTimeout(gifSearchTimer);
+    gifSearchTimer = setTimeout(() => loadGifs(gifSearchEl.value), 350);
+  });
 
   function scrollBottom() { streamEl.scrollTop = streamEl.scrollHeight; }
 

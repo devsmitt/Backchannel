@@ -111,6 +111,10 @@ const HISTORY_LIMIT = 50;               // backlog returned on room entry.
 // only these. A closed set keeps the data clean and the UI tidy.
 const REACTIONS = ['👍', '🔥', '🎉', '👀', '❤️', '😂', '🙌', '🚀'];
 const REACTION_SET = new Set(REACTIONS);
+// GIFs via Tenor (Google). The key stays server-side; the client hits our proxy.
+// A chosen GIF is stored/rendered as a Tenor media URL, allow-listed by host.
+const TENOR_API_KEY = process.env.TENOR_API_KEY || '';
+const TENOR_GIF_RE = /^https:\/\/media\d*\.tenor\.com\/[\w\-/.]+\.gif$/i;
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES) || 5 * 1024 * 1024; // 5MB image ceiling.
 // A stored image path is ALWAYS of the form /uploads/<file> where <file> is the
 // random name we minted. The client must never be able to point this at anything
@@ -181,8 +185,9 @@ const limitSay       = makeLimiter({ capacity: 20,  windowMs: 10 * 1000 });     
 const limitUpload    = makeLimiter({ capacity: 12,  windowMs: 60 * 1000 });        // /upload per token-hash: 12/min
 const limitTyping    = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'typing' per userId: 40 / 10s
 const limitReact     = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'react' per userId: 40 / 10s
+const limitGif       = makeLimiter({ capacity: 40,  windowMs: 60 * 1000 });        // /gif/* per IP: 40 / min
 
-const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitVerify, limitDelete, limitSay, limitUpload, limitTyping, limitReact];
+const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitVerify, limitDelete, limitSay, limitUpload, limitTyping, limitReact, limitGif];
 
 // Extract the client IP. Behind Railway's proxy the real client is the FIRST
 // hop in X-Forwarded-For; fall back to the socket address when no proxy header.
@@ -641,6 +646,53 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- GIF search/trending proxy (Tenor) --------------------------------
+  // The Tenor key stays server-side; the client hits us with its token. We
+  // return only trimmed {id, preview, gif, w, h, alt} rows. Signed-in + rate-
+  // limited per IP so a leaked URL can't burn our quota. contentfilter=high.
+  if (method === 'GET' && (urlPath === '/gif/search' || urlPath === '/gif/featured')) {
+    if (!TENOR_API_KEY) { sendJson(res, 503, { error: 'gifs unavailable' }); return; }
+    const tok = (req.headers['x-bc-token'] || '').toString().trim();
+    if (!tok || !userByTokenHash(sha256(tok))) { sendJson(res, 401, { error: 'unauthorized' }); return; }
+    if (!limitGif.allow('ip:' + clientIp(req))) { sendJson(res, 429, { error: 'rate limited' }); return; }
+    const qs = new URLSearchParams((req.url || '').split('?')[1] || '');
+    const q = (qs.get('q') || '').slice(0, 100);
+    const limit = Math.min(Math.max(Number(qs.get('limit')) || 24, 1), 48);
+    const base = urlPath === '/gif/search'
+      ? 'https://tenor.googleapis.com/v2/search'
+      : 'https://tenor.googleapis.com/v2/featured';
+    const params = new URLSearchParams({
+      key: TENOR_API_KEY, client_key: 'backchannel', limit: String(limit),
+      media_filter: 'tinygif,mediumgif', contentfilter: 'high',
+    });
+    if (urlPath === '/gif/search') {
+      if (!q.trim()) { sendJson(res, 200, { results: [] }); return; }
+      params.set('q', q);
+    }
+    try {
+      const r = await fetch(base + '?' + params.toString());
+      if (!r.ok) { sendJson(res, 502, { error: 'gif upstream' }); return; }
+      const data = await r.json();
+      const results = (Array.isArray(data.results) ? data.results : []).map((g) => {
+        const mf = g.media_formats || {};
+        const tiny = mf.tinygif || {}, med = mf.mediumgif || mf.gif || {};
+        return {
+          id: g.id,
+          preview: tiny.url || med.url,
+          gif: med.url || tiny.url,
+          w: (tiny.dims && tiny.dims[0]) || 0,
+          h: (tiny.dims && tiny.dims[1]) || 0,
+          alt: (g.content_description || 'gif').slice(0, 120),
+        };
+      }).filter((x) => x.preview && TENOR_GIF_RE.test(x.gif || ''));
+      sendJson(res, 200, { results });
+    } catch (e) {
+      console.error('[backchannel] tenor:', e && e.message);
+      sendJson(res, 502, { error: 'gif fetch failed' });
+    }
+    return;
+  }
+
   // --- Claim a username (INVITE-ONLY) ------------------------------------
   // Requires a valid, unused invite code. On success the code is burned and the
   // new user is granted their own invite codes (returned so the installer can
@@ -1036,7 +1088,7 @@ function sendHistory(ws, room) {
   const messages = rows.map((m) => {
     const rr = reactByMsg[m.id] || [];
     return {
-      id: m.id, username: m.username, body: m.body, image: m.image || null, ts: m.created_at,
+      id: m.id, username: m.username, body: m.body, image: m.image || null, gif: m.gif || null, ts: m.created_at,
       reactions: reactionSummary(rr),
       mine: rr.filter((r) => r.user_id === ws.userId).map((r) => r.emoji),
     };
@@ -1252,12 +1304,14 @@ wss.on('connection', (ws) => {
       // Optional image attachment: accept ONLY a /uploads/<file> path we minted
       // (validated by shape), so a client can never smuggle an arbitrary URL in.
       const image = (typeof msg.image === 'string' && UPLOAD_PATH_RE.test(msg.image)) ? msg.image : null;
-      // A message must carry text, an image, or both — empty is dropped.
-      if (!body && !image) return;
+      // A chosen GIF arrives as a Tenor media URL; accept only allow-listed hosts.
+      const gif = (typeof msg.gif === 'string' && TENOR_GIF_RE.test(msg.gif)) ? msg.gif : null;
+      // A message must carry text, an image, or a gif — empty is dropped.
+      if (!body && !image && !gif) return;
 
-      const { id, created_at } = insertMessage(room.id, ws.userId, ws.username, body, image);
+      const { id, created_at } = insertMessage(room.id, ws.userId, ws.username, body, image, gif);
       broadcastMessage(room, ws.userId, {
-        type: 'msg', room: room.slug, id, username: ws.username, body, image, ts: created_at,
+        type: 'msg', room: room.slug, id, username: ws.username, body, image, gif, ts: created_at,
       });
       // Sending implies you're done typing — clear it even if the client didn't.
       setTyping(room, ws.userId, ws.username, false);
