@@ -263,6 +263,16 @@ if [ "$CHOICE" = "move" ]; then
   move_existing
 fi
 
+# Invite-only: new accounts need a code to claim. Ask once up front (re-prompted
+# below if the server rejects it). Normalize to the code alphabet locally too.
+INVITE=""
+INVITES=""
+if [ "$CHOICE" = "new" ]; then
+  printf '  invite code (ask a builder who is already in): ' > /dev/tty
+  IFS= read -r INVITE < /dev/tty || die "could not read invite code."
+  INVITE="$(printf '%s' "$INVITE" | tr 'a-z' 'A-Z' | tr -cd '0-9A-Z')"
+fi
+
 while [ "$CHOICE" = "new" ] ; do
   printf '  choose a username (2-24 chars, a-z 0-9 _ -): ' > /dev/tty
   IFS= read -r raw < /dev/tty || die "could not read username."
@@ -290,18 +300,29 @@ while [ "$CHOICE" = "new" ] ; do
   _u="$(json_escape "$USERNAME")"
   _t="$(json_escape "$TOKEN")"
   _r="$(json_escape "$RECOVERY")"
+  _ic="$(json_escape "$INVITE")"
 
   say "  claiming \"$USERNAME\"..."
-  _out="$(post_json "$SERVER/claim" "{\"username\":\"$_u\",\"token\":\"$_t\",\"recovery\":\"$_r\"}")"
+  _out="$(post_json "$SERVER/claim" "{\"username\":\"$_u\",\"token\":\"$_t\",\"recovery\":\"$_r\",\"code\":\"$_ic\"}")"
   last_code
 
   case "$HTTP_CODE" in
     200)
       say "  claimed: $USERNAME"
+      # Pull the new user's own invite codes out of the response (a JSON array of
+      # strings) into a space-separated list for display below.
+      INVITES="$(printf '%s' "$_out" | sed -n 's/.*"invites":\[\([^]]*\)\].*/\1/p' | tr -d '"' | tr ',' ' ')"
       break
       ;;
     409)
       say "  that username is taken — try another."
+      continue
+      ;;
+    403)
+      say "  that invite code isn't valid (or it's already been used)."
+      printf '  invite code: ' > /dev/tty
+      IFS= read -r INVITE < /dev/tty || die "could not read invite code."
+      INVITE="$(printf '%s' "$INVITE" | tr 'a-z' 'A-Z' | tr -cd '0-9A-Z')"
       continue
       ;;
     000)
@@ -348,6 +369,14 @@ if [ "$CHOICE" = "new" ]; then
   say "   You'll need the phrase (with your username) to sign in on"
   say "   another device or if you lose this machine. It is shown"
   say "   ONLY now. A copy is at $RECOVERY_FILE — but write it down."
+  if [ -n "$INVITES" ]; then
+    say "  ------------------------------------------------------------"
+    say "   invite codes — share these to bring others in:"
+    say ""
+    for _code in $INVITES; do say "       $_code"; done
+    say ""
+    say "   (also in the app: your name → invite codes)"
+  fi
   say "  ============================================================"
   say ""
   while : ; do
