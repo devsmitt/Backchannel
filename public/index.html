@@ -84,15 +84,6 @@
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 26px; border-bottom: 1px solid var(--line);
   }
-  .hgroup { display: flex; align-items: center; gap: 14px; }
-  .railtoggle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; background: none; border: 1px solid var(--line); color: var(--dim); cursor: pointer; flex: 0 0 auto; }
-  .railtoggle:hover { color: var(--text); border-color: var(--ghost); }
-  .railtoggle:focus { outline: none; }
-  .railtoggle:focus-visible { outline: 1px solid var(--ghost); outline-offset: 1px; }
-  body.rail-collapsed .railtoggle { color: var(--text); border-color: var(--ghost); }
-  .railtoggle svg { width: 15px; height: 15px; }
-  body.rail-collapsed .body { grid-template-columns: 0 1fr; }
-  body.rail-collapsed aside { display: none; }
   .wordmark { font-family: var(--mono); font-size: 13px; letter-spacing: 0.34em; text-transform: uppercase; }
   .wordmark b { color: var(--live); font-weight: 600; }
   .nowcount { font-family: var(--mono); font-size: 12px; color: var(--dim); letter-spacing: 0.04em; }
@@ -389,10 +380,16 @@
   .addproject-fields .ap-url  { flex: 0 0 40%; min-width: 0; }
 
   @media (max-width: 720px) {
-    .body { grid-template-columns: 0 1fr; }
+    /* single column: aside leaves the grid (display:none), so main must own the
+       one track — otherwise it auto-places into a 0px column and collapses. */
+    .body { grid-template-columns: 1fr; }
     aside { display: none; }
     .roomhead, .stream, .compose { padding-left: 20px; padding-right: 20px; }
-    .roommenu { left: 20px; }
+    /* narrow: the channel title becomes a full-width select-style bar, and its
+       dropdown drops the full width like a menu (the sidebar is auto-hidden). */
+    .roomhead .rt { flex: 1 1 auto; justify-content: space-between; }
+    .roomhead .topic { display: none; }
+    .roommenu { left: 0; right: 0; top: 100%; min-width: 0; max-width: none; border-radius: 0 0 12px 12px; border-left: none; border-right: none; }
   }
   @media (prefers-reduced-motion: reduce) { .reconn .pip { animation: none; } }
 </style>
@@ -415,10 +412,7 @@
   <!-- ============================== PRESENT: the full app ============================== -->
   <div class="app">
     <header>
-      <div class="hgroup">
-        <button class="railtoggle" id="railToggle" type="button" title="hide sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg></button>
-        <div class="wordmark">backchannel</div>
-      </div>
+      <div class="wordmark">backchannel</div>
       <div class="nowcount"><span class="n" id="nowCount">0</span> active now</div>
       <div class="reconn"><span class="pip"></span> reconnecting</div>
       <div class="me" id="meBtn"><span class="h" id="meName">&nbsp;</span><span class="dot live"></span></div>
@@ -1923,26 +1917,9 @@
     renderSwatches();
   })();
 
-  // ---- Collapsible sidebar (persisted) ------------------------------------
-  // Hide the rail so the window can sit thin and save monitor space. Applied at
-  // init (before the app is shown on presence) so there's no flash.
-  const RAIL_KEY = "backchannel-rail";
-  function applyRail(collapsed) {
-    body.classList.toggle("rail-collapsed", !!collapsed);
-    const b = document.getElementById("railToggle");
-    if (b) b.title = collapsed ? "show sidebar" : "hide sidebar";
-  }
-  (() => {
-    let collapsed = false;
-    try { collapsed = localStorage.getItem(RAIL_KEY) === "1"; } catch (_) {}
-    applyRail(collapsed);
-    const b = document.getElementById("railToggle");
-    if (b) b.addEventListener("click", () => {
-      collapsed = !body.classList.contains("rail-collapsed");
-      try { localStorage.setItem(RAIL_KEY, collapsed ? "1" : "0"); } catch (_) {}
-      applyRail(collapsed);
-    });
-  })();
+  // The sidebar auto-hides below the responsive breakpoint (see the @media rule);
+  // no manual toggle — the window size decides. When hidden, the header channel
+  // title becomes a full-width dropdown for switching channels/DMs.
 
   // reconnect on tab focus if the socket died; also clear "hidden" unread since
   // you're now looking at the current room.
