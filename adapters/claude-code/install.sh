@@ -634,6 +634,97 @@ EOF
 fi
 
 # --------------------------------------------------------------------------
+# Wire Codex hooks (~/.codex/hooks.json) to the SAME hook.sh. Codex's hook
+# system mirrors Claude's (UserPromptSubmit/PreToolUse/Stop, event JSON with
+# session_id on stdin), so the one helper covers both. This is what makes Codex
+# (CLI or the desktop app, which share ~/.codex) actually mark you present —
+# the shell snippet below can't see a GUI agent. Safe + idempotent.
+# --------------------------------------------------------------------------
+CODEX_DIR="$HOME/.codex"
+CODEX_HOOKS="$CODEX_DIR/hooks.json"
+codex_via=""
+mkdir -p "$CODEX_DIR" 2>/dev/null || :
+[ -f "$CODEX_HOOKS" ] && cp "$CODEX_HOOKS" "$CODEX_HOOKS.backchannel.bak" 2>/dev/null || :
+
+if command -v python3 >/dev/null 2>&1; then
+  CODEX_HOOKS="$CODEX_HOOKS" \
+  PROMPT_CMD="$PROMPT_CMD" ENTER_CMD="$ENTER_CMD" EXIT_CMD="$EXIT_CMD" \
+  python3 - <<'PYEOF' && codex_via="python3"
+import json, os
+path = os.environ["CODEX_HOOKS"]
+prompt, enter, exitc = os.environ["PROMPT_CMD"], os.environ["ENTER_CMD"], os.environ["EXIT_CMD"]
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path) as f:
+            txt = f.read().strip()
+        if txt:
+            data = json.loads(txt)
+    except Exception:
+        data = {}
+if not isinstance(data, dict):
+    data = {}
+hooks = data.get("hooks")
+if not isinstance(hooks, dict):
+    hooks = {}
+data["hooks"] = hooks
+
+def is_bc(h):
+    return (isinstance(h, dict) and isinstance(h.get("command"), str)
+            and ("backchannel" in h["command"] or "/enter" in h["command"] or "/exit" in h["command"]))
+
+def ensure(ev, cmd):
+    rebuilt = []
+    for g in (hooks.get(ev) or []):
+        if isinstance(g, dict) and isinstance(g.get("hooks"), list):
+            inner = [h for h in g["hooks"] if not is_bc(h)]
+            if not inner:
+                continue
+            g = dict(g); g["hooks"] = inner
+        rebuilt.append(g)
+    rebuilt.append({"matcher": ".*", "hooks": [{"type": "command", "command": cmd}]})
+    hooks[ev] = rebuilt
+
+ensure("UserPromptSubmit", prompt)
+ensure("PreToolUse", enter)
+ensure("Stop", exitc)
+with open(path, "w") as f:
+    json.dump(data, f, indent=2); f.write("\n")
+PYEOF
+fi
+
+if [ -z "$codex_via" ] && command -v jq >/dev/null 2>&1; then
+  _tmp="$(mktemp 2>/dev/null || printf '%s' "$CODEX_HOOKS.tmp.$$")"
+  if [ -s "$CODEX_HOOKS" ] && jq -e . "$CODEX_HOOKS" >/dev/null 2>&1; then _base="$CODEX_HOOKS"; else printf '{}' > "$_tmp.base"; _base="$_tmp.base"; fi
+  if jq --arg prompt "$PROMPT_CMD" --arg enter "$ENTER_CMD" --arg exitc "$EXIT_CMD" '
+      def is_bc: (.command? // "") | (test("backchannel") or test("/enter") or test("/exit")) ;
+      def strip($e): (.hooks[$e] // []) | map(.hooks = ((.hooks? // []) | map(select(is_bc | not)))) | map(select((.hooks? // []) | length > 0)) ;
+      .hooks = (.hooks // {})
+      | .hooks.UserPromptSubmit = ((strip("UserPromptSubmit")) + [ {"matcher":".*","hooks":[{"type":"command","command":$prompt}]} ])
+      | .hooks.PreToolUse = ((strip("PreToolUse")) + [ {"matcher":".*","hooks":[{"type":"command","command":$enter}]} ])
+      | .hooks.Stop = ((strip("Stop")) + [ {"matcher":".*","hooks":[{"type":"command","command":$exitc}]} ])
+    ' "$_base" > "$_tmp" 2>/dev/null; then
+    mv "$_tmp" "$CODEX_HOOKS"; rm -f "$_tmp.base" 2>/dev/null || :; codex_via="jq"
+  else
+    rm -f "$_tmp" "$_tmp.base" 2>/dev/null || :
+  fi
+fi
+
+if [ -z "$codex_via" ] && [ ! -s "$CODEX_HOOKS" ]; then
+  _p="$(json_escape "$PROMPT_CMD")"; _e="$(json_escape "$ENTER_CMD")"; _x="$(json_escape "$EXIT_CMD")"
+  cat > "$CODEX_HOOKS" <<EOF
+{
+  "hooks": {
+    "UserPromptSubmit": [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$_p" } ] } ],
+    "PreToolUse": [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$_e" } ] } ],
+    "Stop": [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$_x" } ] } ]
+  }
+}
+EOF
+  codex_via="pure-sh"
+fi
+
+# --------------------------------------------------------------------------
 # Shell integration — gate presence for NON-Claude CLI agents + raw terminal.
 #
 # Claude Code uses the precise native hooks wired above. This step is ADDITIVE:
@@ -914,6 +1005,11 @@ if [ "$merged_via" = "manual" ]; then
   say "  hooks:        NOT wired automatically — see the note above"
 else
   say "  hooks:        wired into $SETTINGS_FILE (via $merged_via)"
+fi
+if [ -n "$codex_via" ]; then
+  say "  codex:        wired into $CODEX_HOOKS (via $codex_via)"
+else
+  say "  codex:        hooks NOT wired ($CODEX_HOOKS exists; no python3/jq) — add by hand"
 fi
 case "$SHELL_WIRED" in
   "")        say "  cli agents:   shell integration NOT wired (unknown shell — source $SHELL_SNIPPET manually)" ;;
