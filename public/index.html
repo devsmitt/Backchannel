@@ -173,8 +173,6 @@
   .person.idle .name { color: var(--dim); }
   .person.you .name { color: var(--live); }
   .person .name .handle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .person .streak { margin-left: auto; padding-left: 8px; font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: 0.02em; flex: 0 0 auto; }
-  .person.you .streak { color: var(--live); opacity: 0.85; }
   .person .doing { font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
   .subhead { padding: 4px 22px 2px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ghost); }
   .morelink { padding: 8px 22px 0; font-family: var(--mono); font-size: 11.5px; color: var(--faint); cursor: pointer; }
@@ -199,7 +197,6 @@
   .peoplemenu .pm-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 13.5px; color: var(--dim); }
   .peoplemenu .pm-item:hover { background: var(--hover); }
   .peoplemenu .pm-item .pm-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .peoplemenu .pm-item .pm-streak { font-family: var(--mono); font-size: 10.5px; color: var(--faint); flex: 0 0 auto; }
   .peoplemenu .pm-empty { padding: 10px; color: var(--faint); font-size: 12.5px; }
 
   .stream { overflow-y: auto; padding: 22px 40px 12px; display: flex; flex-direction: column; scrollbar-width: thin; }
@@ -919,13 +916,11 @@
       const isYou = p.username === username;
       const div = document.createElement("div");
       div.className = "person" + (idleCls ? " idle" : "") + (isYou ? " you" : "");
-      const sc = streakCount(p.streak);
       div.innerHTML =
         '<span class="dot ' + (idleCls ? "building" : "live") + '"></span>' +
         '<div class="who">' +
           '<div class="name">' +
             '<span class="handle" style="color:' + colorFor(p.username) + '">@' + esc(p.username) + '</span>' +
-            (sc > 0 ? '<span class="streak">' + esc(String(sc)) + 'd</span>' : '') +
           '</div>' +
           (p.tagline ? '<div class="doing">' + esc(p.tagline) + '</div>' : '') +
         '</div>';
@@ -1067,11 +1062,9 @@
   function peopleMenuItem(p, building) {
     const div = document.createElement("div");
     div.className = "pm-item";
-    const sc = streakCount(p.streak);
     div.innerHTML =
       '<span class="dot ' + (building ? "building" : "live") + '"></span>' +
-      '<span class="pm-name" style="color:' + colorFor(p.username) + '">@' + esc(p.username) + (p.username === username ? " (you)" : "") + '</span>' +
-      (sc > 0 ? '<span class="pm-streak">' + esc(String(sc)) + 'd</span>' : '');
+      '<span class="pm-name" style="color:' + colorFor(p.username) + '">@' + esc(p.username) + (p.username === username ? " (you)" : "") + '</span>';
     div.addEventListener("click", () => { closePeopleMenu(); openProfile(p.username); });
     return div;
   }
