@@ -246,6 +246,12 @@
   .installblock .movehow .gatebtn { margin-top: 12px; }
   .installblock .orline { display: flex; align-items: center; gap: 12px; margin: 22px 0 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ghost); }
   .installblock .orline::before, .installblock .orline::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+  .installblock .recover-link { margin-top: 18px; font-size: 11px; color: var(--faint); }
+  .installblock .recover-link:hover { color: var(--dim); }
+  .installblock .recoverfields { text-align: left; margin-top: 12px; }
+  .installblock .recoverfields .editline { margin-top: 10px; }
+  .installblock .recoverfields .editline input { width: 100%; }
+  .installblock .recoverfields .gatebtn { margin-top: 12px; }
   #signinErr { margin-top: 16px; color: var(--danger); opacity: 0; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em; transition: opacity 240ms ease; min-height: 1em; }
   body.signin-error #signinErr { opacity: 0.95; }
   .signedas { margin-top: 20px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; color: var(--ghost); text-transform: uppercase; }
@@ -315,6 +321,17 @@
   .linkcode .lc-exp { font-family: var(--mono); font-size: 10.5px; color: var(--ghost); }
   #linkDevice { margin-left: 16px; }
   .rotate-link { margin-left: 16px; }
+
+  /* leave backchannel (own profile) */
+  .leave-section .leave-row { margin-top: 16px; }
+  .leave-section .leave-h { font-size: 13px; color: var(--text); margin-bottom: 8px; }
+  .leave-section .leave-sub { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-bottom: 10px; line-height: 1.5; }
+  .leave-section .cmd { display: flex; align-items: center; gap: 0.6em; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 10px 10px 13px; }
+  .leave-section .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  .leave-section .cmd code::-webkit-scrollbar { display: none; }
+  .leave-section .copybtn { flex: 0 0 auto; background: color-mix(in srgb, var(--live) 10%, transparent); border: 1px solid color-mix(in srgb, var(--live) 25%, transparent); color: var(--live); border-radius: 6px; font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer; }
+  .leave-section .leave-del { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: var(--danger); background: none; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); border-radius: 6px; padding: 7px 13px; cursor: pointer; }
+  .leave-section .leave-del:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
   .rotate-link:hover { color: var(--danger); }
   .rotate-link.busy { color: var(--ghost); cursor: default; }
 
@@ -426,39 +443,27 @@
       <div class="installblock">
         <button class="reveal" id="moveBtn" type="button">moving devices? &rarr;</button>
         <div class="installsteps" id="moveSteps" hidden>
-          <div class="movehow">
-            <div class="movelabel">link from another device</div>
-            <div class="sub">On a device you're already signed in on: click your name (top-right) &rarr; <b>link a device</b>, then enter the code it shows you here.</div>
-            <div class="tokenbox">
-              <span class="caret">›</span>
-              <input id="linkCode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="device-link code" />
-              <button class="gatebtn" id="linkBtn" type="button">link</button>
-            </div>
+          <div class="sub">On a device you're already signed in on: click your name (top-right) &rarr; <b>link a device</b>, and enter the code it shows you:</div>
+          <div class="tokenbox">
+            <span class="caret">›</span>
+            <input id="linkCode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="device-link code" />
+            <button class="gatebtn" id="linkBtn" type="button">link</button>
           </div>
-          <div class="orline">or recover with your phrase</div>
-          <div class="movehow">
-            <div class="sub">Lost all your devices? Use the recovery phrase you saved at sign-up.</div>
+          <button class="reveal recover-link" id="recoverBtn" type="button">lost all your devices? &rarr;</button>
+          <div class="recoverfields" id="recoverFields" hidden>
+            <div class="sub">Recover with the username + recovery phrase you saved at sign-up.</div>
             <div class="editline"><input class="field" id="recUser" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="username" /></div>
-            <div class="editline"><input class="field" id="recPhrase" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="recovery phrase (the words you saved)" /></div>
+            <div class="editline"><input class="field" id="recPhrase" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="recovery phrase" /></div>
             <button class="gatebtn" id="recBtn" type="button">recover account</button>
           </div>
         </div>
       </div>
-
-      <!-- token fallback: rarely needed — most people use new/move above -->
-      <div class="installblock">
-        <button class="reveal" id="tokenBtn" type="button">have a token? &rarr;</button>
-        <div class="installsteps" id="tokenReveal" hidden>
-          <div class="tokenbox">
-            <span class="caret">›</span>
-            <input id="tokenInput" type="password" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="token" />
-            <button class="gatebtn" id="signinBtn" type="button">enter</button>
-          </div>
-          <div class="sub">paste a token only if you copied one directly — otherwise use “new here” or “moving devices”.</div>
-        </div>
-      </div>
     </div>
   </div>
+
+  <!-- token sign-in lives only behind the installer's rare fallback; kept off the
+       main screen since users never handle the raw token in normal use. -->
+  <input type="hidden" id="tokenInput" /><button type="button" id="signinBtn" hidden></button>
 
   <!-- ============================== NOT PRESENT (building / offline) ============================== -->
   <div class="gate notpresent">
@@ -1108,7 +1113,21 @@
             '<div class="saverow"><button class="smallbtn" id="apSave">add</button>' +
             '<button class="smallbtn ghost" id="apCancel">cancel</button></div>' +
           '</div>' : '') +
-      '</div>';
+      '</div>' +
+      (isYou
+        ? '<div class="profile-section leave-section">' +
+            '<div class="label">leave backchannel</div>' +
+            '<div class="leave-row">' +
+              '<div class="leave-h">remove from this device</div>' +
+              '<div class="cmd"><code id="uninstallCmd"></code><button class="copybtn" id="copyUninstall" type="button">copy</button></div>' +
+            '</div>' +
+            '<div class="leave-row">' +
+              '<div class="leave-h">delete your account</div>' +
+              '<div class="leave-sub">erases your profile, projects, and messages everywhere. can’t be undone.</div>' +
+              '<button class="leave-del" id="deleteAccount" type="button">delete account</button>' +
+            '</div>' +
+          '</div>'
+        : '');
 
     profileCard.innerHTML = html;
     bindProfileClose();
@@ -1170,6 +1189,49 @@
   }
 
   function wireOwnProfileEdits(u) {
+    // ---- Leave backchannel: uninstall command + delete account ----
+    const uninstallCmd = document.getElementById("uninstallCmd");
+    if (uninstallCmd) {
+      const cmd = "curl -fsSL " + location.origin + "/uninstall.sh | sh";
+      uninstallCmd.textContent = cmd;
+      const cp = document.getElementById("copyUninstall");
+      if (cp) cp.addEventListener("click", async () => {
+        let ok = false;
+        try { await navigator.clipboard.writeText(cmd); ok = true; } catch (_) {}
+        cp.textContent = ok ? "copied" : "press ⌘C";
+        setTimeout(() => { cp.textContent = "copy"; }, 1500);
+      });
+    }
+    const delBtn = document.getElementById("deleteAccount");
+    if (delBtn) {
+      delBtn.addEventListener("click", () => {
+        if (delBtn.dataset.busy) return;
+        const ok = window.confirm(
+          "Delete your account?\n\n" +
+          "This erases your profile, projects, and messages everywhere and frees " +
+          "your username. It cannot be undone.\n\n" +
+          "(To also remove Backchannel from this computer, run the uninstall " +
+          "command shown above.)"
+        );
+        if (!ok) return;
+        delBtn.dataset.busy = "1";
+        delBtn.textContent = "deleting…";
+        fetch("/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: token }) })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => {
+            if (d && d.ok) {
+              try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+              manualClose = true;
+              try { ws && ws.close(); } catch (_) {}
+              location.reload();   // back to the signed-out screen
+            } else {
+              delBtn.dataset.busy = ""; delBtn.textContent = "delete failed — retry";
+            }
+          })
+          .catch(() => { delBtn.dataset.busy = ""; delBtn.textContent = "delete failed — retry"; });
+      });
+    }
+
     // ---- Link a device: mint a single-use code to sign in elsewhere ----
     // Reuses the pairing endpoint: POST /pair/new {token} -> a short code the
     // user types on their other device (sign-in screen -> "moving devices?").
@@ -1359,12 +1421,12 @@
     moveBtn.textContent = moveSteps.hidden ? "moving devices? →" : "moving devices? ↓";
   });
 
-  const tokenBtn = document.getElementById("tokenBtn");
-  const tokenReveal = document.getElementById("tokenReveal");
-  if (tokenBtn && tokenReveal) tokenBtn.addEventListener("click", () => {
-    tokenReveal.hidden = !tokenReveal.hidden;
-    tokenBtn.textContent = tokenReveal.hidden ? "have a token? →" : "have a token? ↓";
-    if (!tokenReveal.hidden) { try { tokenInput.focus(); } catch (_) {} }
+  const recoverBtn = document.getElementById("recoverBtn");
+  const recoverFields = document.getElementById("recoverFields");
+  if (recoverBtn && recoverFields) recoverBtn.addEventListener("click", () => {
+    recoverFields.hidden = !recoverFields.hidden;
+    recoverBtn.textContent = recoverFields.hidden ? "lost all your devices? →" : "lost all your devices? ↓";
+    if (!recoverFields.hidden) { try { document.getElementById("recUser").focus(); } catch (_) {} }
   });
 
   // Device-link: redeem a short code minted on another signed-in device.
