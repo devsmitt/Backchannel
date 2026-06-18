@@ -87,6 +87,9 @@
   .hgroup { display: flex; align-items: center; gap: 14px; }
   .railtoggle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; background: none; border: 1px solid var(--line); color: var(--dim); cursor: pointer; flex: 0 0 auto; }
   .railtoggle:hover { color: var(--text); border-color: var(--ghost); }
+  .railtoggle:focus { outline: none; }
+  .railtoggle:focus-visible { outline: 1px solid var(--ghost); outline-offset: 1px; }
+  body.rail-collapsed .railtoggle { color: var(--text); border-color: var(--ghost); }
   .railtoggle svg { width: 15px; height: 15px; }
   body.rail-collapsed .body { grid-template-columns: 0 1fr; }
   body.rail-collapsed aside { display: none; }
@@ -151,12 +154,13 @@
   /* ---- conversation ---- */
   main { display: grid; grid-template-rows: auto 1fr auto auto; min-height: 0; }
   .roomhead { padding: 15px 40px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 14px; }
-  .roomhead .rt { font-family: var(--mono); font-size: 14px; color: var(--text); }
-  .roomhead .topic { font-size: 13px; color: var(--faint); }
+  .roomhead .rt { font-family: var(--mono); font-size: 14px; color: var(--text); flex: 0 0 auto; white-space: nowrap; }
+  /* topic stays on one line and truncates so a thin window never wraps the head */
+  .roomhead .topic { font-size: 13px; color: var(--faint); flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .stream { overflow-y: auto; padding: 22px 40px 12px; display: flex; flex-direction: column; scrollbar-width: thin; }
   .streamspacer { flex: 1 1 auto; min-height: 0; }  /* push few msgs to bottom; collapses on overflow */
-  .col { max-width: 660px; width: 100%; }
+  .col { max-width: 760px; width: 100%; }
   .daydiv { display: flex; align-items: center; gap: 14px; margin: 6px 0 16px; color: var(--ghost); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; }
   .daydiv::before, .daydiv::after { content: ""; height: 1px; background: var(--line); flex: 1; }
 
