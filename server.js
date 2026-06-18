@@ -274,18 +274,27 @@ function broadcastAll(payload) {
 }
 
 // ---------------------------------------------------------------------------
-// Roster: derive active / building / offline from in-memory presence +
-// persisted last_active, then broadcast to everyone.
+// Roster: derive active / building / offline from TWO independent signals —
+// the agent's hook activity AND whether the user actually has Backchannel open.
 //
-//   active   : presence.present === true (their agent is working now)
-//   building : not present, but (now - last_active) < BUILDING_WINDOW_MS
-//   offline  : everyone else
+//   active   : agent building right now AND a live socket (a tab is open) —
+//              verifiably present in the channel.
+//   building : working but NOT here (agent building, no tab) OR built within the
+//              last BUILDING_WINDOW. Proves work, not presence — a user can run
+//              all day in 'building' and never reach 'active' if they never open
+//              Backchannel.
+//   offline  : everyone else.
 //
-// Shape (per the contract):
-//   { type:'roster', active:[{username,tagline,streak}], building:[...], offline:[...] }
-// We send offline as a full list (client may collapse to a count); each offline
-// entry carries the same {username,tagline,streak} for the expandable view.
+// The open WebSocket is the presence proof: the browser holds one whenever the
+// site is open. `hasTab` checks userSockets, which only holds AUTHED sockets.
+//
+// Shape: { type:'roster', active:[{username,tagline,streak}], building:[...], offline:[...] }
 // ---------------------------------------------------------------------------
+
+function hasOpenTab(userId) {
+  const set = userSockets.get(userId);
+  return !!(set && set.size > 0);
+}
 
 function buildRoster(now = Date.now()) {
   const active = [];
@@ -293,10 +302,12 @@ function buildRoster(now = Date.now()) {
   const offline = [];
   for (const u of allUsersForRoster()) {
     const entry = { username: u.username, tagline: u.tagline || '', streak: u.streak || 0 };
-    if (isPresent(u.id)) {
-      active.push(entry);
-    } else if (u.last_active && now - u.last_active < BUILDING_WINDOW_MS) {
-      building.push(entry);
+    const agentActive = isPresent(u.id);
+    const recent = u.last_active && now - u.last_active < BUILDING_WINDOW_MS;
+    if (agentActive && hasOpenTab(u.id)) {
+      active.push(entry);            // building AND in the channel
+    } else if (agentActive || recent) {
+      building.push(entry);          // working but not here, or recently built
     } else {
       offline.push(entry);
     }
@@ -1177,13 +1188,15 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     if (ws.userId) {
-      detachSocket(ws.userId, ws);
+      const uid = ws.userId;
+      detachSocket(uid, ws);
       // Clear any lingering typing state for this socket's room so a disconnect
       // mid-type doesn't leave a stale "typing…" for everyone else.
-      if (ws.room) clearTypingForSlug(ws.room, ws.userId);
-      // A user's last socket closing doesn't end their build (presence is hook-
-      // driven), but refresh the roster so a fully-disconnected/idle user is
-      // reflected on the next sweep.
+      if (ws.room) clearTypingForSlug(ws.room, uid);
+      // Closing the LAST tab doesn't end the build (presence is hook-driven), but
+      // it does drop them out of 'active' (no longer verifiably in the channel),
+      // so re-broadcast the roster to move them to 'building' right away.
+      if (!hasOpenTab(uid)) broadcastRoster();
     }
   });
 
