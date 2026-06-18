@@ -81,16 +81,27 @@
   body.present .app { display: grid; }
 
   header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 26px; border-bottom: 1px solid var(--line);
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 16px 26px; border-bottom: 1px solid var(--line); position: relative;
   }
-  .wordmark { font-family: var(--mono); font-size: 13px; letter-spacing: 0.34em; text-transform: uppercase; }
+  .wordmark { font-family: var(--mono); font-size: 13px; letter-spacing: 0.34em; text-transform: uppercase; justify-self: start; }
   .wordmark b { color: var(--live); font-weight: 600; }
+  .hright { justify-self: end; }
   .nowcount { font-family: var(--mono); font-size: 12px; color: var(--dim); letter-spacing: 0.04em; }
   .nowcount .n { color: var(--text); }
   .me { display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); cursor: pointer; }
   .me .h { color: var(--text); }
   .me:hover .h { color: var(--live); }
+
+  /* center: the current channel/dm as a dropdown switcher */
+  .roomswitch { justify-self: center; }
+  .roomswitch .rt { display: inline-flex; align-items: center; gap: 7px; background: none; border: none; padding: 4px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+  .roomswitch .rt:hover { background: var(--hover); }
+  .roomswitch .rt .rt-label { font-family: var(--mono); font-size: 14px; color: var(--text); }
+  .roomswitch .rt .rt-caret { font-size: 13px; color: var(--dim); transition: transform 130ms ease; }
+  .roomswitch .rt.open .rt-caret { transform: translateY(1px) rotate(180deg); color: var(--text); }
+  .roomswitch .rt:focus { outline: none; }
+  .roomswitch .rt:focus-visible { outline: 1px solid var(--ghost); outline-offset: 1px; }
 
   .reconn { display: none; font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: 0.06em; align-items: center; gap: 7px; }
   .reconn .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); animation: blink 1.2s ease-in-out infinite; }
@@ -113,6 +124,10 @@
   .swatch { width: 13px; height: 13px; border-radius: 50%; background: var(--sw); border: none; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3); transition: transform 120ms ease; }
   .swatch:hover { transform: scale(1.18); }
   .swatch.sel { box-shadow: 0 0 0 2px var(--rail), 0 0 0 3.5px var(--sw); }
+  /* color picker inside the profile gets roomier swatches */
+  .profile-section .colorsub { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-bottom: 13px; }
+  .profile-section .swatches { gap: 11px; }
+  .profile-section .swatch { width: 22px; height: 22px; }
   .section { margin-bottom: 22px; }
   .sechead { display:flex; justify-content:space-between; align-items:center; padding: 0 22px; margin-bottom: 8px; }
   .sechead .label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--faint); }
@@ -149,21 +164,10 @@
   .morelink:hover { color: var(--dim); }
 
   /* ---- conversation ---- */
-  main { display: grid; grid-template-rows: auto 1fr auto auto; min-height: 0; }
-  .roomhead { padding: 15px 40px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 14px; position: relative; }
-  /* title is a dropdown trigger: switch channel/dm from here (key in a thin window) */
-  .roomhead .rt { flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 6px; background: none; border: none; padding: 0; cursor: pointer; white-space: nowrap; }
-  .roomhead .rt .rt-label { font-family: var(--mono); font-size: 14px; color: var(--text); }
-  .roomhead .rt .rt-caret { font-size: 10px; color: var(--faint); transition: transform 130ms ease; }
-  .roomhead .rt:hover .rt-caret { color: var(--dim); }
-  .roomhead .rt.open .rt-caret { transform: translateY(1px) rotate(180deg); color: var(--dim); }
-  .roomhead .rt:focus { outline: none; }
-  .roomhead .rt:focus-visible .rt-label { text-decoration: underline; }
-  /* topic stays on one line and truncates so a thin window never wraps the head */
-  .roomhead .topic { font-size: 13px; color: var(--faint); flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  main { display: grid; grid-template-rows: 1fr auto; min-height: 0; }
 
-  /* quick-switch dropdown */
-  .roommenu { position: absolute; top: calc(100% - 5px); left: 40px; z-index: 30; min-width: 240px; max-width: 320px; max-height: 64vh; overflow-y: auto; scrollbar-width: thin; background: var(--rail); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 14px 36px rgba(0,0,0,0.45); }
+  /* quick-switch dropdown — anchored under the header's centered title */
+  .roommenu { position: absolute; top: calc(100% - 1px); left: 50%; transform: translateX(-50%); z-index: 30; min-width: 260px; max-width: 340px; max-height: 64vh; overflow-y: auto; scrollbar-width: thin; background: var(--rail); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 14px 36px rgba(0,0,0,0.45); }
   .roommenu .rm-head { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint); padding: 9px 10px 4px; }
   .roommenu .rm-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 13.5px; color: var(--dim); }
   .roommenu .rm-item:hover { background: var(--hover); }
@@ -390,12 +394,12 @@
        one track — otherwise it auto-places into a 0px column and collapses. */
     .body { grid-template-columns: 1fr; }
     aside { display: none; }
-    .roomhead, .stream, .compose { padding-left: 20px; padding-right: 20px; }
-    /* narrow: the channel title becomes a full-width select-style bar, and its
-       dropdown drops the full width like a menu (the sidebar is auto-hidden). */
-    .roomhead .rt { flex: 1 1 auto; justify-content: space-between; }
-    .roomhead .topic { display: none; }
-    .roommenu { left: 0; right: 0; top: 100%; min-width: 0; max-width: none; border-radius: 0 0 12px 12px; border-left: none; border-right: none; }
+    header { padding-left: 20px; padding-right: 20px; }
+    .stream, .compose { padding-left: 20px; padding-right: 20px; }
+    /* the header title is the only nav now — make the caret a touch bolder and
+       drop the menu full width under the top bar */
+    .roomswitch .rt .rt-caret { font-size: 15px; color: var(--text); }
+    .roommenu { left: 0; right: 0; transform: none; top: 100%; min-width: 0; max-width: none; border-radius: 0 0 12px 12px; border-left: none; border-right: none; }
   }
   @media (prefers-reduced-motion: reduce) { .reconn .pip { animation: none; } }
 </style>
@@ -419,9 +423,17 @@
   <div class="app">
     <header>
       <div class="wordmark">backchannel</div>
-      <div class="nowcount"><span class="n" id="nowCount">0</span> active now</div>
-      <div class="reconn"><span class="pip"></span> reconnecting</div>
-      <div class="me" id="meBtn"><span class="h" id="meName">&nbsp;</span><span class="dot live"></span></div>
+      <div class="roomswitch">
+        <button class="rt" id="roomTitle" type="button" title="switch channel / dm">
+          <span class="rt-label" id="roomTitleLabel">#general</span>
+          <span class="rt-caret" aria-hidden="true">▾</span>
+        </button>
+      </div>
+      <div class="hright">
+        <div class="nowcount"><span class="n" id="nowCount">0</span> active</div>
+        <div class="reconn"><span class="pip"></span> reconnecting</div>
+      </div>
+      <div class="roommenu" id="roomMenu" hidden></div>
     </header>
 
     <div class="body">
@@ -443,23 +455,14 @@
           </div>
         </div>
 
-        <!-- theme bar: light/dark toggle + accent swatches, pinned bottom-left -->
+        <!-- bottom bar: light/dark toggle + your name (profile link) -->
         <div class="themebar">
           <button class="theme-toggle" id="themeToggle" type="button" title="toggle theme"></button>
-          <div class="swatches" id="swatches"></div>
+          <div class="me" id="meBtn"><span class="dot live"></span><span class="h" id="meName">&nbsp;</span></div>
         </div>
       </aside>
 
       <main>
-        <div class="roomhead">
-          <button class="rt" id="roomTitle" type="button" title="switch channel / dm">
-            <span class="rt-label" id="roomTitleLabel">#general</span>
-            <span class="rt-caret" aria-hidden="true">▾</span>
-          </button>
-          <span class="topic" id="roomTopic"></span>
-          <div class="roommenu" id="roomMenu" hidden></div>
-        </div>
-
         <div class="stream" id="stream">
           <div class="streamspacer"></div>
           <div class="col" id="streamCol"></div>
@@ -564,7 +567,6 @@
   const roomTitleEl   = document.getElementById("roomTitle");
   const roomTitleLabelEl = document.getElementById("roomTitleLabel");
   const roomMenuEl    = document.getElementById("roomMenu");
-  const roomTopicEl   = document.getElementById("roomTopic");
   const streamEl      = document.getElementById("stream");
   const streamColEl   = document.getElementById("streamCol");
   const sayEl         = document.getElementById("say");
@@ -939,13 +941,9 @@
   function markRoomHead() {
     const r = findRoom(currentRoom);
     if (!r) return;
-    if (r.type === "dm" || r.type === "group") {
-      roomTitleLabelEl.textContent = "@" + dmLabel(r);
-      roomTopicEl.textContent = r.type === "group" ? "group" : "direct message";
-    } else {
-      roomTitleLabelEl.textContent = "#" + channelName(r);
-      roomTopicEl.textContent = topicFor(r.slug || r.name);
-    }
+    roomTitleLabelEl.textContent = (r.type === "dm" || r.type === "group")
+      ? "@" + dmLabel(r)
+      : "#" + channelName(r);
   }
   function topicFor(slug) {
     const t = {
@@ -1289,6 +1287,13 @@
         '<div class="stat"><div class="v">' + esc(String(u.totalBuilds || 0)) + '</div><div class="l">sessions</div></div>' +
         '<div class="stat"><div class="v">' + esc(btStr) + '</div><div class="l">build-time</div></div>' +
       '</div>' +
+      (isYou
+        ? '<div class="profile-section">' +
+            '<div class="label">your color</div>' +
+            '<div class="colorsub">this is the color others see your name in.</div>' +
+            '<div class="swatches" id="swatches"></div>' +
+          '</div>'
+        : '') +
       '<div class="profile-section">' +
         '<div class="label">projects</div>' +
         '<div id="projectsView"></div>' +
@@ -1329,6 +1334,7 @@
     bindProfileClose();
     renderProjects(u.projects || [], isYou);
     if (isYou) renderInvites(u.invites || []);
+    if (isYou) renderSwatches();   // color picker lives in your profile now
 
     if (!isYou) {
       const msgBtn = document.getElementById("msgBtn");
@@ -1959,7 +1965,7 @@
     const btn = document.getElementById("themeToggle");
     if (btn) btn.addEventListener("click", () => setTheme(!isLight()));
     renderThemeToggle();
-    renderSwatches();
+    // swatches are rendered into the profile when it opens (renderSwatches there)
   })();
 
   // The sidebar auto-hides below the responsive breakpoint (see the @media rule);
