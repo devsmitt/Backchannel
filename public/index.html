@@ -404,13 +404,23 @@
     <div class="gatecard">
       <div class="wordmark">backchannel</div>
       <h2>sign in</h2>
-      <p>paste your token.</p>
-      <div class="tokenbox">
-        <span class="caret">›</span>
-        <input id="tokenInput" type="password" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="token" />
-        <button class="gatebtn" id="signinBtn" type="button">enter</button>
-      </div>
+      <p>new here, or moving a device over?</p>
       <div id="signinErr">&nbsp;</div>
+
+      <!-- brand new here -->
+      <div class="installblock">
+        <button class="reveal" id="newHereBtn" type="button">new here? &rarr;</button>
+        <div class="installsteps" id="installSteps" hidden>
+          <ol class="steps">
+            <li>run this in your terminal
+              <div class="cmd"><code id="installCmd"></code><button class="copybtn" id="copyInstall" type="button">copy</button></div>
+            </li>
+            <li>claim a username, then <b>save your recovery phrase</b> when it asks (it's how you sign in on other devices)</li>
+            <li>confirm you saved it — your browser opens, signed in. fire a prompt at your agent and you're in.</li>
+          </ol>
+          <div class="sub">one install signs you in on this browser for good. you appear in the channel only while your agent is working.</div>
+        </div>
+      </div>
 
       <!-- moving an existing account onto this device -->
       <div class="installblock">
@@ -435,18 +445,16 @@
         </div>
       </div>
 
-      <!-- brand new here -->
+      <!-- token fallback: rarely needed — most people use new/move above -->
       <div class="installblock">
-        <button class="reveal" id="newHereBtn" type="button">new here? &rarr;</button>
-        <div class="installsteps" id="installSteps" hidden>
-          <ol class="steps">
-            <li>run this in your terminal
-              <div class="cmd"><code id="installCmd"></code><button class="copybtn" id="copyInstall" type="button">copy</button></div>
-            </li>
-            <li>claim a username, then <b>save your recovery phrase</b> when it asks (it's how you sign in on other devices)</li>
-            <li>confirm you saved it — your browser opens, signed in. fire a prompt at your agent and you're in.</li>
-          </ol>
-          <div class="sub">one install signs you in on this browser for good. you appear in the channel only while your agent is working.</div>
+        <button class="reveal" id="tokenBtn" type="button">have a token? &rarr;</button>
+        <div class="installsteps" id="tokenReveal" hidden>
+          <div class="tokenbox">
+            <span class="caret">›</span>
+            <input id="tokenInput" type="password" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="token" />
+            <button class="gatebtn" id="signinBtn" type="button">enter</button>
+          </div>
+          <div class="sub">paste a token only if you copied one directly — otherwise use “new here” or “moving devices”.</div>
         </div>
       </div>
     </div>
@@ -1349,6 +1357,14 @@
   if (moveBtn && moveSteps) moveBtn.addEventListener("click", () => {
     moveSteps.hidden = !moveSteps.hidden;
     moveBtn.textContent = moveSteps.hidden ? "moving devices? →" : "moving devices? ↓";
+  });
+
+  const tokenBtn = document.getElementById("tokenBtn");
+  const tokenReveal = document.getElementById("tokenReveal");
+  if (tokenBtn && tokenReveal) tokenBtn.addEventListener("click", () => {
+    tokenReveal.hidden = !tokenReveal.hidden;
+    tokenBtn.textContent = tokenReveal.hidden ? "have a token? →" : "have a token? ↓";
+    if (!tokenReveal.hidden) { try { tokenInput.focus(); } catch (_) {} }
   });
 
   // Device-link: redeem a short code minted on another signed-in device.
