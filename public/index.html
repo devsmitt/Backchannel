@@ -260,10 +260,8 @@
   .orb::after { animation-delay: 1.7s; }
   @keyframes orbping { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(6); opacity: 0; } }
 
-  .pulse { display: inline-flex; align-items: center; gap: 8px; margin: 24px auto 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--dim); }
-  .pulse .pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 16%, transparent); animation: pulseblink 2.4s ease-in-out infinite; }
-  @keyframes pulseblink { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
-  @media (prefers-reduced-motion: reduce) { .orb::before, .orb::after { display: none; } .pulse .pulse-dot { animation: none; } }
+  .pulse { display: inline-flex; align-items: center; margin: 24px auto 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--dim); }
+  @media (prefers-reduced-motion: reduce) { .orb::before, .orb::after { display: none; } }
 
   .tokenbox { display: flex; align-items: center; gap: 0.6em; width: 100%; max-width: 360px; margin: 24px auto 0; background: var(--rail); border: 1px solid var(--ghost); border-radius: 8px; padding: 10px 14px; }
   .tokenbox .caret { font-family: var(--mono); color: var(--faint); }
@@ -492,7 +490,7 @@
       <div class="orb" aria-hidden="true"></div>
       <div class="lander-mark">backchannel</div>
       <p class="lander-line">a room that's only open while you build.</p>
-      <div class="pulse" id="pulse" hidden><span class="pulse-dot"></span><span id="pulseText"></span></div>
+      <div class="pulse" id="pulse" hidden><span id="pulseText"></span></div>
       <p class="lander-sub">install a hook, fire a prompt, and you appear in the channel while your agent works. when it stops, you fade. no lurking; everyone here is mid-build.</p>
       <div id="signinErr">&nbsp;</div>
 
@@ -2051,8 +2049,8 @@
     if (!el || !txt) return;
     const n = d && typeof d.building === "number" ? d.building : 0;
     txt.textContent = n > 0
-      ? n + (n === 1 ? " builder building right now" : " builders building right now")
-      : "quiet right now — the room opens when someone builds";
+      ? n + (n === 1 ? " builder in the backchannel" : " builders in the backchannel")
+      : "the backchannel is quiet right now";
     el.hidden = false;
   }
   function fetchPulse() {
