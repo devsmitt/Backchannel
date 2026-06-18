@@ -153,10 +153,27 @@
 
   /* ---- conversation ---- */
   main { display: grid; grid-template-rows: auto 1fr auto auto; min-height: 0; }
-  .roomhead { padding: 15px 40px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 14px; }
-  .roomhead .rt { font-family: var(--mono); font-size: 14px; color: var(--text); flex: 0 0 auto; white-space: nowrap; }
+  .roomhead { padding: 15px 40px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 14px; position: relative; }
+  /* title is a dropdown trigger: switch channel/dm from here (key in a thin window) */
+  .roomhead .rt { flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 6px; background: none; border: none; padding: 0; cursor: pointer; white-space: nowrap; }
+  .roomhead .rt .rt-label { font-family: var(--mono); font-size: 14px; color: var(--text); }
+  .roomhead .rt .rt-caret { font-size: 10px; color: var(--faint); transition: transform 130ms ease; }
+  .roomhead .rt:hover .rt-caret { color: var(--dim); }
+  .roomhead .rt.open .rt-caret { transform: translateY(1px) rotate(180deg); color: var(--dim); }
+  .roomhead .rt:focus { outline: none; }
+  .roomhead .rt:focus-visible .rt-label { text-decoration: underline; }
   /* topic stays on one line and truncates so a thin window never wraps the head */
   .roomhead .topic { font-size: 13px; color: var(--faint); flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* quick-switch dropdown */
+  .roommenu { position: absolute; top: calc(100% - 5px); left: 40px; z-index: 30; min-width: 240px; max-width: 320px; max-height: 64vh; overflow-y: auto; scrollbar-width: thin; background: var(--rail); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 14px 36px rgba(0,0,0,0.45); }
+  .roommenu .rm-head { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint); padding: 9px 10px 4px; }
+  .roommenu .rm-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 13.5px; color: var(--dim); }
+  .roommenu .rm-item:hover { background: var(--hover); }
+  .roommenu .rm-item.sel { background: var(--sel); color: var(--text); }
+  .roommenu .rm-hash { font-family: var(--mono); color: var(--faint); }
+  .roommenu .rm-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .roommenu .rm-badge { font-family: var(--mono); font-size: 11px; color: var(--bg); background: var(--live); border-radius: 9px; padding: 0 6px; min-width: 18px; text-align: center; flex: 0 0 auto; }
 
   .stream { overflow-y: auto; padding: 22px 40px 12px; display: flex; flex-direction: column; scrollbar-width: thin; }
   .streamspacer { flex: 1 1 auto; min-height: 0; }  /* push few msgs to bottom; collapses on overflow */
@@ -375,6 +392,7 @@
     .body { grid-template-columns: 0 1fr; }
     aside { display: none; }
     .roomhead, .stream, .compose { padding-left: 20px; padding-right: 20px; }
+    .roommenu { left: 20px; }
   }
   @media (prefers-reduced-motion: reduce) { .reconn .pip { animation: none; } }
 </style>
@@ -434,8 +452,12 @@
 
       <main>
         <div class="roomhead">
-          <span class="rt" id="roomTitle">#general</span>
+          <button class="rt" id="roomTitle" type="button" title="switch channel / dm">
+            <span class="rt-label" id="roomTitleLabel">#general</span>
+            <span class="rt-caret" aria-hidden="true">▾</span>
+          </button>
           <span class="topic" id="roomTopic"></span>
+          <div class="roommenu" id="roomMenu" hidden></div>
         </div>
 
         <div class="stream" id="stream">
@@ -540,6 +562,8 @@
   const rosterEl      = document.getElementById("roster");
   const rosterCountEl  = document.getElementById("rosterCount");
   const roomTitleEl   = document.getElementById("roomTitle");
+  const roomTitleLabelEl = document.getElementById("roomTitleLabel");
+  const roomMenuEl    = document.getElementById("roomMenu");
   const roomTopicEl   = document.getElementById("roomTopic");
   const streamEl      = document.getElementById("stream");
   const streamColEl   = document.getElementById("streamCol");
@@ -768,6 +792,8 @@
       div.addEventListener("click", () => { if (key !== currentRoom) joinRoom(key); });
       dmListEl.appendChild(div);
     });
+    // keep the quick-switch dropdown in sync (unread/presence) while it's open
+    if (roomMenuEl && !roomMenuEl.hidden) renderRoomMenu();
   }
 
   function isActive(u) { return lastRoster.active.some((p) => p.username === u); }
@@ -871,6 +897,7 @@
 
   // ---- Room switching -----------------------------------------------------
   function joinRoom(key) {
+    closeRoomMenu();           // close the quick-switch dropdown if it was open
     stopTyping();              // tell the old room we stopped
     clearTypingIndicator();    // and clear whatever the old room was showing
     clearPending();            // a staged attachment belongs to the room you left
@@ -891,10 +918,10 @@
       if (!label && Array.isArray(r.members)) {
         label = r.members.filter((u) => u !== username).join(", ");
       }
-      roomTitleEl.textContent = "@" + (label || "direct");
+      roomTitleLabelEl.textContent = "@" + (label || "direct");
       roomTopicEl.textContent = r.type === "group" ? "group" : "direct message";
     } else {
-      roomTitleEl.textContent = "#" + channelName(r);
+      roomTitleLabelEl.textContent = "#" + channelName(r);
       roomTopicEl.textContent = topicFor(r.slug || r.name);
     }
   }
@@ -906,6 +933,52 @@
     };
     return t[slug] || "";
   }
+
+  // ---- Quick-switch dropdown (header title) -------------------------------
+  // The channel name in the header opens a menu of channels + DMs (with unread
+  // counts), so you can switch rooms even when the sidebar is collapsed.
+  function roomMenuItem(r, isDm) {
+    const key = roomKey(r);
+    const div = document.createElement("div");
+    div.className = "rm-item" + (key === currentRoom ? " sel" : "");
+    if (isDm) {
+      let label = r.name;
+      if (!label && Array.isArray(r.members)) label = r.members.filter((u) => u !== username).join(", ") || r.members.join(", ");
+      const others = (r.members || []).filter((u) => u !== username);
+      const dotCls = others.some(isActive) ? "live" : others.some(isBuilding) ? "building" : "offline";
+      div.innerHTML = '<span class="dot ' + dotCls + '"></span><span class="rm-name">' + esc(label || "direct") + '</span>';
+    } else {
+      div.innerHTML = '<span class="rm-hash">#</span><span class="rm-name">' + esc(channelName(r)) + '</span>';
+    }
+    const u = unread[key] || 0;
+    if (u > 0 && key !== currentRoom) {
+      const b = document.createElement("span");
+      b.className = "rm-badge"; b.textContent = u > 99 ? "99+" : String(u);
+      div.appendChild(b);
+    }
+    div.addEventListener("click", () => { closeRoomMenu(); if (key !== currentRoom) joinRoom(key); });
+    return div;
+  }
+  function renderRoomMenu() {
+    if (!roomMenuEl) return;
+    roomMenuEl.innerHTML = "";
+    const ch = document.createElement("div"); ch.className = "rm-head"; ch.textContent = "channels";
+    roomMenuEl.appendChild(ch);
+    rooms.forEach((r) => roomMenuEl.appendChild(roomMenuItem(r, false)));
+    if (dms.length) {
+      const dh = document.createElement("div"); dh.className = "rm-head"; dh.textContent = "direct";
+      roomMenuEl.appendChild(dh);
+      dms.forEach((r) => roomMenuEl.appendChild(roomMenuItem(r, true)));
+    }
+  }
+  function openRoomMenu() { if (!roomMenuEl) return; renderRoomMenu(); roomMenuEl.hidden = false; roomTitleEl.classList.add("open"); }
+  function closeRoomMenu() { if (roomMenuEl) { roomMenuEl.hidden = true; roomTitleEl.classList.remove("open"); } }
+  function toggleRoomMenu() { (roomMenuEl && roomMenuEl.hidden) ? openRoomMenu() : closeRoomMenu(); }
+  if (roomTitleEl) roomTitleEl.addEventListener("click", (e) => { e.stopPropagation(); toggleRoomMenu(); });
+  document.addEventListener("click", (e) => {
+    if (roomMenuEl && !roomMenuEl.hidden && !roomMenuEl.contains(e.target) && !roomTitleEl.contains(e.target)) closeRoomMenu();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRoomMenu(); });
 
   // ---- Rendering messages -------------------------------------------------
   function clearStream() { streamColEl.innerHTML = ""; lastSender = null; }
@@ -1677,7 +1750,7 @@
     const r = findRoom(currentRoom);
     if (r) {
       const label = (r.type === "dm" || r.type === "group")
-        ? "message " + roomTitleEl.textContent + "…"
+        ? "message " + roomTitleLabelEl.textContent + "…"
         : "message #" + channelName(r) + "…";
       sayEl.placeholder = label;
     }
