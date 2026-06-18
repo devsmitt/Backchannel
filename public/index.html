@@ -100,7 +100,11 @@
   .wordmark { font-family: var(--mono); font-size: 13px; letter-spacing: 0.34em; text-transform: uppercase; justify-self: start; }
   .wordmark b { color: var(--live); font-weight: 600; }
   .hright { justify-self: end; }
-  .nowcount { font-family: var(--mono); font-size: 12px; color: var(--dim); letter-spacing: 0.04em; }
+  .nowcount { font-family: var(--mono); font-size: 12px; color: var(--dim); letter-spacing: 0.04em; background: none; border: none; padding: 4px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+  .nowcount:hover, .nowcount.open { background: var(--hover); }
+  .nowcount.open { color: var(--text); }
+  .nowcount:focus { outline: none; }
+  .nowcount:focus-visible { outline: 1px solid var(--ghost); outline-offset: 1px; }
   .nowcount .n { color: var(--text); }
   .me { display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 12.5px; color: var(--dim); cursor: pointer; }
   .me .h { color: var(--text); }
@@ -188,6 +192,15 @@
   .roommenu .rm-hash { font-family: var(--mono); color: var(--faint); }
   .roommenu .rm-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .roommenu .rm-badge { font-family: var(--mono); font-size: 11px; color: var(--bg); background: var(--live); border-radius: 9px; padding: 0 6px; min-width: 18px; text-align: center; flex: 0 0 auto; }
+
+  /* who's-here dropdown — opens from the "N active" count, mirrors the channel menu */
+  .peoplemenu { position: absolute; top: calc(100% - 1px); right: 26px; z-index: 30; min-width: 240px; max-width: 320px; max-height: 64vh; overflow-y: auto; scrollbar-width: thin; background: var(--rail); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 14px 36px rgba(0,0,0,0.45); }
+  .peoplemenu .pm-head { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint); padding: 9px 10px 4px; }
+  .peoplemenu .pm-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 13.5px; color: var(--dim); }
+  .peoplemenu .pm-item:hover { background: var(--hover); }
+  .peoplemenu .pm-item .pm-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .peoplemenu .pm-item .pm-streak { font-family: var(--mono); font-size: 10.5px; color: var(--faint); flex: 0 0 auto; }
+  .peoplemenu .pm-empty { padding: 10px; color: var(--faint); font-size: 12.5px; }
 
   .stream { overflow-y: auto; padding: 22px 40px 12px; display: flex; flex-direction: column; scrollbar-width: thin; }
   .streamspacer { flex: 1 1 auto; min-height: 0; }  /* push few msgs to bottom; collapses on overflow */
@@ -430,8 +443,11 @@
        drop the menu full width under the top bar */
     .roomswitch .rt .rt-caret { font-size: 15px; color: var(--text); }
     .roommenu { left: 0; right: 0; transform: none; top: 100%; min-width: 0; max-width: none; border-radius: 0 0 12px 12px; border-left: none; border-right: none; }
+    /* the sidebar roster is hidden on mobile, so this dropdown is the only way to
+       see who's here — drop it full width too. */
+    .peoplemenu { left: 0; right: 0; top: 100%; min-width: 0; max-width: none; border-radius: 0 0 12px 12px; border-left: none; border-right: none; }
     /* roomier tap targets + a tighter wordmark so small phones don't crowd */
-    .roommenu .rm-item { padding: 11px 12px; }
+    .roommenu .rm-item, .peoplemenu .pm-item { padding: 11px 12px; }
     .wordmark { font-size: 12px; letter-spacing: 0.18em; }
     .roomswitch .rt { padding: 6px 10px; }
   }
@@ -464,10 +480,13 @@
         </button>
       </div>
       <div class="hright">
-        <div class="nowcount"><span class="n" id="nowCount">0</span> active</div>
+        <button class="nowcount" id="nowCountBtn" type="button" title="who's here">
+          <span class="n" id="nowCount">0</span> active
+        </button>
         <div class="reconn"><span class="pip"></span> reconnecting</div>
       </div>
       <div class="roommenu" id="roomMenu" hidden></div>
+      <div class="peoplemenu" id="peopleMenu" hidden></div>
     </header>
 
     <div class="body">
@@ -524,7 +543,7 @@
             <li>run this in your terminal
               <div class="cmd"><code id="installCmd"></code><button class="copybtn" id="copyInstall" type="button">copy</button></div>
             </li>
-            <li>claim a username, then <b>save your recovery phrase</b> when it asks (it's how you sign in on other devices)</li>
+            <li>claim a username, then <b>save your recovery phrase</b> when it asks (it's your only way back if you ever lose access to every environment)</li>
             <li>confirm you saved it, and your browser opens signed in. fire a prompt at your agent and you're in.</li>
           </ol>
           <div class="sub">one install signs you in on this browser for good. you appear in the channel only while your agent is working.</div>
@@ -604,6 +623,8 @@
   const meNameEl      = document.getElementById("meName");
   const meBtn         = document.getElementById("meBtn");
   const nowCountEl     = document.getElementById("nowCount");
+  const nowCountBtnEl  = document.getElementById("nowCountBtn");
+  const peopleMenuEl   = document.getElementById("peopleMenu");
   const roomListEl    = document.getElementById("roomList");
   const dmListEl      = document.getElementById("dmList");
   const dmSectionEl   = document.getElementById("dmSection");
@@ -967,6 +988,8 @@
 
     // refresh dm presence dots whenever the roster changes
     renderDms();
+    // keep the who's-here dropdown live if it's open
+    if (peopleMenuEl && !peopleMenuEl.hidden) renderPeopleMenu();
   }
 
   // ---- Room switching -----------------------------------------------------
@@ -1035,14 +1058,52 @@
       dms.forEach((r) => roomMenuEl.appendChild(roomMenuItem(r, true)));
     }
   }
-  function openRoomMenu() { if (!roomMenuEl) return; renderRoomMenu(); roomMenuEl.hidden = false; roomTitleEl.classList.add("open"); }
+  function openRoomMenu() { if (!roomMenuEl) return; closePeopleMenu(); renderRoomMenu(); roomMenuEl.hidden = false; roomTitleEl.classList.add("open"); }
   function closeRoomMenu() { if (roomMenuEl) { roomMenuEl.hidden = true; roomTitleEl.classList.remove("open"); } }
   function toggleRoomMenu() { (roomMenuEl && roomMenuEl.hidden) ? openRoomMenu() : closeRoomMenu(); }
   if (roomTitleEl) roomTitleEl.addEventListener("click", (e) => { e.stopPropagation(); toggleRoomMenu(); });
+
+  // ---- Who's-here dropdown (opens from the "N active" count) ---------------
+  function peopleMenuItem(p, building) {
+    const div = document.createElement("div");
+    div.className = "pm-item";
+    const sc = streakCount(p.streak);
+    div.innerHTML =
+      '<span class="dot ' + (building ? "building" : "live") + '"></span>' +
+      '<span class="pm-name" style="color:' + colorFor(p.username) + '">@' + esc(p.username) + (p.username === username ? " (you)" : "") + '</span>' +
+      (sc > 0 ? '<span class="pm-streak">' + esc(String(sc)) + 'd</span>' : '');
+    div.addEventListener("click", () => { closePeopleMenu(); openProfile(p.username); });
+    return div;
+  }
+  function renderPeopleMenu() {
+    if (!peopleMenuEl) return;
+    peopleMenuEl.innerHTML = "";
+    const active = lastRoster.active || [], building = lastRoster.building || [];
+    if (active.length) {
+      const h = document.createElement("div"); h.className = "pm-head"; h.textContent = "active · " + active.length;
+      peopleMenuEl.appendChild(h);
+      active.forEach((p) => peopleMenuEl.appendChild(peopleMenuItem(p, false)));
+    }
+    if (building.length) {
+      const h = document.createElement("div"); h.className = "pm-head"; h.textContent = "building · " + building.length;
+      peopleMenuEl.appendChild(h);
+      building.forEach((p) => peopleMenuEl.appendChild(peopleMenuItem(p, true)));
+    }
+    if (!active.length && !building.length) {
+      const e = document.createElement("div"); e.className = "pm-empty"; e.textContent = "just you so far";
+      peopleMenuEl.appendChild(e);
+    }
+  }
+  function openPeopleMenu() { if (!peopleMenuEl) return; closeRoomMenu(); renderPeopleMenu(); peopleMenuEl.hidden = false; if (nowCountBtnEl) nowCountBtnEl.classList.add("open"); }
+  function closePeopleMenu() { if (peopleMenuEl) { peopleMenuEl.hidden = true; if (nowCountBtnEl) nowCountBtnEl.classList.remove("open"); } }
+  function togglePeopleMenu() { (peopleMenuEl && peopleMenuEl.hidden) ? openPeopleMenu() : closePeopleMenu(); }
+  if (nowCountBtnEl) nowCountBtnEl.addEventListener("click", (e) => { e.stopPropagation(); togglePeopleMenu(); });
+
   document.addEventListener("click", (e) => {
     if (roomMenuEl && !roomMenuEl.hidden && !roomMenuEl.contains(e.target) && !roomTitleEl.contains(e.target)) closeRoomMenu();
+    if (peopleMenuEl && !peopleMenuEl.hidden && !peopleMenuEl.contains(e.target) && !(nowCountBtnEl && nowCountBtnEl.contains(e.target))) closePeopleMenu();
   });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRoomMenu(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeRoomMenu(); closePeopleMenu(); } });
 
   // ---- Rendering messages -------------------------------------------------
   function clearStream() { streamColEl.innerHTML = ""; lastSender = null; }
