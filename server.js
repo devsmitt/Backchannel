@@ -38,7 +38,13 @@ import {
   userByTokenHash,
   userByName,
   userById,
-  updateToken,
+  addDeviceToken,
+  deviceByTokenHash,
+  listDevices,
+  removeDevice,
+  removeDeviceByTokenHash,
+  revokeAllDevices,
+  touchDevice,
   deleteUser,
   setTagline,
   setColor,
@@ -172,6 +178,13 @@ const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, l
 
 // Extract the client IP. Behind Railway's proxy the real client is the FIRST
 // hop in X-Forwarded-For; fall back to the socket address when no proxy header.
+// A short, friendly label for a paired environment, inferred from the caller.
+// Browsers send a Mozilla UA; the installer's curl does not.
+function deviceLabel(req) {
+  const ua = String((req && req.headers && req.headers['user-agent']) || '');
+  return /mozilla|chrome|safari|firefox|edg/i.test(ua) ? 'browser' : 'cli';
+}
+
 function clientIp(req) {
   const xff = req.headers['x-forwarded-for'];
   if (typeof xff === 'string' && xff.length) {
@@ -615,7 +628,7 @@ const server = http.createServer(async (req, res) => {
     if (!username || !token || !recovery) { sendJson(res, 400, { error: 'bad request' }); return; }
     if (!code) { sendJson(res, 403, { error: 'invite', reason: 'missing' }); return; }
 
-    const result = claimWithInvite(username, sha256(token), sha256(recovery), code);
+    const result = claimWithInvite(username, sha256(token), sha256(recovery), code, deviceLabel(req));
     if (result.ok) {
       sendJson(res, 200, { ok: true, username: result.username, invites: result.invites });
     } else if (result.error === 'taken') {
@@ -627,7 +640,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- Recover an identity onto a new token ------------------------------
+  // --- Recover an account (DESTRUCTIVE reset) ---------------------------
+  // {username, recovery, newToken} -> verify the phrase, then REVOKE every paired
+  // environment and add this one fresh. This is the "lost everything / start
+  // over" path: every other device is signed out. (Pairing, below, is additive.)
   if (method === 'POST' && urlPath === '/recover') {
     const parsed = await readJsonBody(req);
     if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
@@ -641,23 +657,20 @@ const server = http.createServer(async (req, res) => {
     const user = userByName(username);
     if (!user || user.recovery_hash !== sha256(recovery)) { sendJson(res, 403, { error: 'no match' }); return; }
     try {
-      updateToken(user.id, sha256(newToken));
+      revokeAllDevices(user.id);                                   // wipe every environment
+      addDeviceToken(user.id, sha256(newToken), deviceLabel(req)); // and pair this one fresh
       sendJson(res, 200, { ok: true });
-    } catch {
-      // New token hash collides with an existing user's token — refuse.
-      sendJson(res, 403, { error: 'no match' });
+    } catch (e) {
+      console.error('[backchannel] recover:', e);
+      sendJson(res, 500, { error: 'recover failed' });
     }
     return;
   }
 
-  // --- Rotate a token (kill a leaked token without losing identity) ------
-  // {token} -> if it resolves to a user, mint a NEW secret token, swap the
-  // stored token_hash, and return 200 {token:<new>}. The OLD token stops
-  // working immediately (its hash no longer matches any row). This is distinct
-  // from /recover: rotation needs the CURRENT token (not the recovery phrase)
-  // and keeps the same identity — it just retires a secret that may have leaked.
-  // Unknown token -> 401 with the same shape; never reveals whether a token
-  // exists beyond the auth result the caller already holds.
+  // --- Rotate THIS environment's token (kill a leaked token) -------------
+  // {token} -> if it resolves to a user, retire just this device's token and add
+  // a fresh one, returning 200 {token:<new>}. Other paired environments are
+  // untouched. Distinct from /recover (which needs the phrase and wipes all).
   if (method === 'POST' && urlPath === '/rotate') {
     const parsed = await readJsonBody(req);
     if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
@@ -665,20 +678,17 @@ const server = http.createServer(async (req, res) => {
     const token = body && typeof body.token === 'string' ? body.token.trim() : '';
     if (!token) { sendJson(res, 400, { error: 'bad request' }); return; }
     const oldHash = sha256(token);
-    // Rate-limit per token-hash so a stolen token can't be used to churn
-    // rotations; an IP fallback caps garbage-token floods on this path too.
     if (!limitRotate.allow(oldHash) || !limitRotate.allow('ip:' + clientIp(req))) {
       sendJson(res, 429, { error: 'rate limited' }); return;
     }
     const user = userByTokenHash(oldHash);
     if (!user) { sendJson(res, 401, { error: 'unauthorized' }); return; }
-    // Mint a fresh 64-hex secret; retry on the astronomically unlikely
-    // hash collision with an existing row.
     let attempts = 0;
     while (attempts++ < 5) {
       const next = crypto.randomBytes(32).toString('hex');
       try {
-        updateToken(user.id, sha256(next));
+        addDeviceToken(user.id, sha256(next), deviceLabel(req));
+        removeDeviceByTokenHash(oldHash);   // retire the old one only after the new lands
         sendJson(res, 200, { token: next });
         return;
       } catch {
@@ -744,12 +754,11 @@ const server = http.createServer(async (req, res) => {
     if (!user) { sendJson(res, 400, { error: 'bad request' }); return; }
 
     sweepPairings();
-    // Mint a code; on the astronomically unlikely collision, retry.
+    // Mint a code bound to this user; on the unlikely collision, retry.
     let code = newPairCode();
     while (pairings.has(code)) code = newPairCode();
     pairings.set(code, {
       userId: user.id,
-      token,
       expiresAt: Date.now() + PAIR_CODE_TTL_MS,
       used: false,
     });
@@ -757,10 +766,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- Pairing: redeem a code for the raw token -------------------------
-  // {code} -> if valid + unexpired + unused: burn it, return 200 {token}.
-  // Invalid / expired / already-used -> 404 {error}. The browser stores the
-  // returned token locally for subsequent auth.
+  // --- Pairing: redeem a code (ADDITIVE — new environment) -------------
+  // {code} -> if valid + unexpired + unused: burn it, mint a FRESH token for the
+  // code's user, and return 200 {token}. The redeeming machine becomes a new
+  // paired environment; every existing one stays active.
   if (method === 'POST' && urlPath === '/pair/redeem') {
     if (!limitPairRedeem.allow(clientIp(req))) { sendJson(res, 429, { error: 'rate limited' }); return; }
     const parsed = await readJsonBody(req);
@@ -774,11 +783,20 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 404, { error: 'invalid code' });
       return;
     }
-
-    // Single-use: mark used and remove so it can never be redeemed twice.
     rec.used = true;
-    pairings.delete(code);
-    sendJson(res, 200, { token: rec.token });
+    pairings.delete(code);   // single-use
+
+    // Mint a brand-new token for this environment.
+    let attempts = 0;
+    while (attempts++ < 5) {
+      const next = crypto.randomBytes(32).toString('hex');
+      try {
+        addDeviceToken(rec.userId, sha256(next), deviceLabel(req));
+        sendJson(res, 200, { token: next });
+        return;
+      } catch { /* token-hash collision — retry */ }
+    }
+    sendJson(res, 500, { error: 'pair failed' });
     return;
   }
 
@@ -1109,12 +1127,17 @@ wss.on('connection', (ws) => {
     // --- hello: authenticate this socket from its token -------------------
     if (msg.type === 'hello') {
       const token = typeof msg.token === 'string' ? msg.token.trim() : '';
-      const user = token ? userByTokenHash(sha256(token)) : null;
+      const tokenHash = token ? sha256(token) : '';
+      const user = tokenHash ? userByTokenHash(tokenHash) : null;
       if (!user) {
         wsError(ws, 'bad token');
         try { ws.close(); } catch { /* harmless */ }
         return;
       }
+
+      // Remember which paired environment this socket is (mark "current" + revoke
+      // gating in the device list) and stamp its last-seen.
+      try { const dev = deviceByTokenHash(tokenHash); ws.deviceId = dev ? dev.id : null; touchDevice(tokenHash); } catch { ws.deviceId = null; }
 
       // Rebind (re-hello after reconnect) — detach the prior identity.
       if (ws.userId && ws.userId !== user.id) detachSocket(ws.userId, ws);
@@ -1203,6 +1226,30 @@ wss.on('connection', (ws) => {
       else if (typeof ref === 'string') room = roomBySlug(ref.trim()) || roomById(Number(ref));
       if (!room || !canAccessRoom(ws.userId, room)) return;
       setTyping(room, ws.userId, ws.username, !!msg.state);
+      return;
+    }
+
+    // --- list_devices: your paired environments (for the profile) --------
+    if (msg.type === 'list_devices') {
+      if (!ws.userId) return;
+      const devices = listDevices(ws.userId).map((d) => ({
+        id: d.id, label: d.label || '', createdAt: d.created_at, lastSeen: d.last_seen,
+        current: d.id === ws.deviceId,
+      }));
+      try { ws.send(JSON.stringify({ type: 'devices', devices })); } catch {}
+      return;
+    }
+
+    // --- remove_device: revoke one paired environment (not the current one) -
+    if (msg.type === 'remove_device') {
+      if (!ws.userId) return;
+      const id = Number(msg.id);
+      if (id && id !== ws.deviceId) removeDevice(ws.userId, id);   // can't revoke yourself here
+      const devices = listDevices(ws.userId).map((d) => ({
+        id: d.id, label: d.label || '', createdAt: d.created_at, lastSeen: d.last_seen,
+        current: d.id === ws.deviceId,
+      }));
+      try { ws.send(JSON.stringify({ type: 'devices', devices })); } catch {}
       return;
     }
 

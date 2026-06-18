@@ -68,6 +68,18 @@ db.exec(`
     color          TEXT    DEFAULT ''
   );
 
+  -- One identity, many paired environments. Each machine/browser holds its OWN
+  -- token (all active at once); auth resolves a user through here. Pairing ADDS a
+  -- row; recovery wipes them all and adds one fresh; the profile lists + revokes.
+  CREATE TABLE IF NOT EXISTS device_tokens (
+    id         INTEGER PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    label      TEXT DEFAULT '',
+    created_at INTEGER,
+    last_seen  INTEGER
+  );
+
   CREATE TABLE IF NOT EXISTS rooms (
     id         INTEGER PRIMARY KEY,
     slug       TEXT UNIQUE NOT NULL,
@@ -128,7 +140,27 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id, id);
   CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_invites_owner ON invites(owner_id);
+  CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
 `);
+
+// One-time: seed device_tokens from the legacy single users.token_hash so existing
+// accounts keep working (their current token becomes their first paired device).
+// Idempotent — skipped once a token already exists in device_tokens.
+(() => {
+  try {
+    const rows = db.prepare(
+      "SELECT id, token_hash, created_at FROM users WHERE token_hash IS NOT NULL AND token_hash != ''"
+    ).all();
+    const seen = db.prepare('SELECT 1 FROM device_tokens WHERE token_hash = ?');
+    const ins = db.prepare(
+      'INSERT OR IGNORE INTO device_tokens (user_id, token_hash, label, created_at, last_seen) VALUES (?, ?, ?, ?, ?)'
+    );
+    const now = Date.now();
+    for (const u of rows) {
+      if (!seen.get(u.token_hash)) ins.run(u.id, u.token_hash, 'existing', u.created_at || now, now);
+    }
+  } catch (e) { /* table just created; fine */ }
+})();
 
 // ---------------------------------------------------------------------------
 // Safe migration of a pre-existing v1 database: add any missing columns. Each
@@ -236,7 +268,21 @@ function yesterdayOf(day) {
 const stmtInsertUser = db.prepare(
   'INSERT INTO users (username, token_hash, recovery_hash, created_at) VALUES (?, ?, ?, ?)'
 );
-const stmtUserByTokenHash = db.prepare('SELECT * FROM users WHERE token_hash = ?');
+// Auth resolves a user through their device tokens (one per paired environment).
+const stmtUserByTokenHash = db.prepare(
+  'SELECT u.* FROM users u JOIN device_tokens d ON d.user_id = u.id WHERE d.token_hash = ?'
+);
+const stmtInsertDevice = db.prepare(
+  'INSERT INTO device_tokens (user_id, token_hash, label, created_at, last_seen) VALUES (?, ?, ?, ?, ?)'
+);
+const stmtDeviceByHash = db.prepare('SELECT * FROM device_tokens WHERE token_hash = ?');
+const stmtDevicesForUser = db.prepare(
+  'SELECT id, label, created_at, last_seen FROM device_tokens WHERE user_id = ? ORDER BY created_at ASC, id ASC'
+);
+const stmtRemoveDevice = db.prepare('DELETE FROM device_tokens WHERE id = ? AND user_id = ?');
+const stmtRemoveDeviceByHash = db.prepare('DELETE FROM device_tokens WHERE token_hash = ?');
+const stmtRevokeAllDevices = db.prepare('DELETE FROM device_tokens WHERE user_id = ?');
+const stmtTouchDevice = db.prepare('UPDATE device_tokens SET last_seen = ? WHERE token_hash = ?');
 const stmtUserByName = db.prepare('SELECT * FROM users WHERE username = ?');
 const stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?');
 const stmtUpdateToken = db.prepare('UPDATE users SET token_hash = ? WHERE id = ?');
@@ -405,20 +451,23 @@ export function invitesForUser(ownerId) {
  * Returns { ok:true, id, username, invites:[...] } or { ok:false, error }.
  *   error: 'invite_invalid' | 'invite_used' | 'taken'
  */
-export function claimWithInvite(username, tokenHash, recoveryHash, code) {
+export function claimWithInvite(username, tokenHash, recoveryHash, code, label = '') {
   const tx = db.transaction(() => {
     const inv = stmtInviteByCode.get(code);
     if (!inv) return { ok: false, error: 'invite_invalid' };
     if (inv.used_by) return { ok: false, error: 'invite_used' };
 
+    const now = Date.now();
     let info;
     try {
-      info = stmtInsertUser.run(username, tokenHash, recoveryHash, Date.now());
+      info = stmtInsertUser.run(username, tokenHash, recoveryHash, now);
     } catch {
       return { ok: false, error: 'taken' };   // username or token_hash UNIQUE
     }
     const userId = info.lastInsertRowid;
-    db.prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE code = ?').run(userId, Date.now(), code);
+    // the claiming machine becomes the first paired environment
+    addDeviceToken(userId, tokenHash, label, now);
+    db.prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE code = ?').run(userId, now, code);
     const invites = mintInvitesInner(userId, INVITE_GRANT);
     return { ok: true, id: userId, username, invites };
   });
@@ -449,6 +498,46 @@ export function claimWithInvite(username, tokenHash, recoveryHash, code) {
 /** Resolve a user from a token hash (the per-socket / hook auth lookup). */
 export function userByTokenHash(tokenHash) {
   return stmtUserByTokenHash.get(tokenHash);
+}
+
+// ---------------------------------------------------------------------------
+// Device tokens — one per paired environment (machine/browser).
+// ---------------------------------------------------------------------------
+
+/** Pair a new environment: add a token for this user. Returns the device id. */
+export function addDeviceToken(userId, tokenHash, label = '', now = Date.now()) {
+  const info = stmtInsertDevice.run(userId, tokenHash, String(label || '').slice(0, 40), now, now);
+  return info.lastInsertRowid;
+}
+
+/** The device row for a token hash (to mark "current" + stamp last_seen). */
+export function deviceByTokenHash(tokenHash) {
+  return stmtDeviceByHash.get(tokenHash);
+}
+
+/** A user's paired environments (no hashes — just id/label/timestamps). */
+export function listDevices(userId) {
+  return stmtDevicesForUser.all(userId);
+}
+
+/** Revoke one environment by id (owner-scoped). Returns true if removed. */
+export function removeDevice(userId, deviceId) {
+  return stmtRemoveDevice.run(Number(deviceId), userId).changes > 0;
+}
+
+/** Revoke a specific token (used by rotate on the current device). */
+export function removeDeviceByTokenHash(tokenHash) {
+  stmtRemoveDeviceByHash.run(tokenHash);
+}
+
+/** Revoke ALL of a user's environments (recovery resets everything). */
+export function revokeAllDevices(userId) {
+  stmtRevokeAllDevices.run(userId);
+}
+
+/** Stamp an environment's last-seen (on connect). */
+export function touchDevice(tokenHash, now = Date.now()) {
+  try { stmtTouchDevice.run(now, tokenHash); } catch { /* ignore */ }
 }
 
 /** Total registered builders (for the lander's live pulse). */
