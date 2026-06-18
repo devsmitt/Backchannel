@@ -451,6 +451,11 @@ export function userByTokenHash(tokenHash) {
   return stmtUserByTokenHash.get(tokenHash);
 }
 
+/** Total registered builders (for the lander's live pulse). */
+export function countUsers() {
+  return db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+}
+
 /** Resolve a user by username (claim collision, recovery, profile, dm). */
 export function userByName(username) {
   return stmtUserByName.get(username);

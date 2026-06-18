@@ -31,6 +31,7 @@ import {
   sha256,
   CAPS,
   createUser,
+  countUsers,
   claimWithInvite,
   invitesForUser,
   normInvite,
@@ -584,6 +585,18 @@ const server = http.createServer(async (req, res) => {
 
   // --- Health ------------------------------------------------------------
   if (method === 'GET' && urlPath === '/healthz') { sendText(res, 200, 'ok'); return; }
+
+  // --- Pulse: public, aggregate-only live heartbeat for the lander -------
+  // How many builders are working right now (present), and how many exist. No
+  // identities — just the two numbers that make the lander feel alive.
+  if (method === 'GET' && urlPath === '/pulse') {
+    let building = 0;
+    for (const s of presence.values()) if (s && s.present) building++;
+    let builders = 0;
+    try { builders = countUsers(); } catch { /* ignore */ }
+    sendJson(res, 200, { building, builders });
+    return;
+  }
 
   // --- Claim a username (INVITE-ONLY) ------------------------------------
   // Requires a valid, unused invite code. On success the code is burned and the
