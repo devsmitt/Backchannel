@@ -163,16 +163,77 @@ open_url() {
 }
 
 # --------------------------------------------------------------------------
-# Username claim loop
+# Move an existing account onto this device. Two self-contained ways:
+#   • a device-link CODE  (minted on another signed-in device:
+#                          backchannel -> your name -> "link a device")
+#   • your USERNAME + RECOVERY PHRASE (the words saved at sign-up)
+# We auto-detect: input with a space = a phrase (we then ask the username);
+# otherwise = a code. Sets TOKEN (and RECOVERY when known) + MOVED=yes.
+# --------------------------------------------------------------------------
+move_existing() {
+  say ""
+  say "  move your account here:"
+  say "   • a device-link code (other device: your name -> 'link a device'), or"
+  say "   • your username + recovery phrase"
+  say ""
+  while : ; do
+    printf '  paste a device-link code OR your recovery phrase: ' > /dev/tty
+    IFS= read -r _in < /dev/tty || die "could not read input."
+    _in="$(printf '%s' "$_in" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [ -n "$_in" ] || { say "  nothing entered — try again."; continue; }
+
+    case "$_in" in
+      *[[:space:]]*)
+        # Has whitespace -> a recovery phrase. Ask for the username, then rebind.
+        printf '  your username: ' > /dev/tty
+        IFS= read -r _mu < /dev/tty || die "could not read username."
+        _mu="$(printf '%s' "$_mu" | tr 'A-Z' 'a-z' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        [ -n "$_mu" ] || { say "  username required — try again."; continue; }
+        TOKEN="$(gen_token)"
+        _ju="$(json_escape "$_mu")"; _jr="$(json_escape "$_in")"; _jt="$(json_escape "$TOKEN")"
+        _out="$(post_json "$SERVER/recover" "{\"username\":\"$_ju\",\"recovery\":\"$_jr\",\"newToken\":\"$_jt\"}")"
+        last_code
+        case "$HTTP_CODE" in
+          200) RECOVERY="$_in"; USERNAME="$_mu"; MOVED="yes"; say "  recovered: $_mu"; return 0 ;;
+          403) say "  that username + phrase didn't match — try again." ;;
+          429) say "  too many tries — wait a few minutes, then retry." ;;
+          000) die "could not reach $SERVER — check your connection." ;;
+          *)   say "  recover failed (HTTP $HTTP_CODE) — try again." ;;
+        esac
+        ;;
+      *)
+        # No whitespace -> a device-link code.
+        _jc="$(json_escape "$_in")"
+        _out="$(post_json "$SERVER/pair/redeem" "{\"code\":\"$_jc\"}")"
+        last_code
+        if [ "$HTTP_CODE" = "200" ]; then
+          TOKEN="$(printf '%s' "$_out" | json_field token)"
+          if [ -n "$TOKEN" ]; then MOVED="yes"; say "  device linked."; return 0; fi
+          say "  empty link response — try again."
+        elif [ "$HTTP_CODE" = "000" ]; then
+          die "could not reach $SERVER — check your connection."
+        else
+          say "  that code is invalid or expired — try again."
+        fi
+        ;;
+    esac
+  done
+}
+
+# --------------------------------------------------------------------------
+# Identity: reuse an existing install, start a new account, or move one here.
 #
 # Idempotent: if this machine already has a token, we REUSE that identity and
-# just re-run the wiring (hooks/shell/sign-in). Re-running the installer must
-# never create a duplicate user or rotate your secret — it's the upgrade path.
+# just re-run the wiring (never a duplicate user, never a rotated secret).
+# Otherwise we fork: NEW claims a username (+ generates a recovery phrase the
+# user must save); MOVE pulls an existing identity onto this device.
 # --------------------------------------------------------------------------
 TOKEN=""
 RECOVERY=""
 USERNAME=""
 EXISTING_INSTALL=""
+MOVED=""
+CHOICE=""
 
 if [ -s "$TOKEN_FILE" ]; then
   TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE" 2>/dev/null || printf '')"
@@ -183,8 +244,27 @@ if [ -s "$TOKEN_FILE" ]; then
   fi
 fi
 
-while [ -z "$EXISTING_INSTALL" ] ; do
-  printf 'choose a username (2-24 chars, a-z 0-9 _ -): ' > /dev/tty
+# Fork only when this machine has no token yet. Enter defaults to "new".
+if [ -z "$EXISTING_INSTALL" ]; then
+  say ""
+  say "  new here, or moving an account onto this device?"
+  while [ -z "$CHOICE" ]; do
+    printf '  [n] new account   [m] move existing  (n/m): ' > /dev/tty
+    IFS= read -r _c < /dev/tty || die "could not read choice."
+    case "$(printf '%s' "$_c" | tr 'A-Z' 'a-z' | tr -d '[:space:]')" in
+      n|new|"") CHOICE="new" ;;
+      m|move)   CHOICE="move" ;;
+      *)        say "  please type n or m." ;;
+    esac
+  done
+fi
+
+if [ "$CHOICE" = "move" ]; then
+  move_existing
+fi
+
+while [ "$CHOICE" = "new" ] ; do
+  printf '  choose a username (2-24 chars, a-z 0-9 _ -): ' > /dev/tty
   IFS= read -r raw < /dev/tty || die "could not read username."
 
   # Lowercase and trim surrounding whitespace.
@@ -242,10 +322,43 @@ done
 umask 077
 mkdir -p "$CONFIG_DIR"
 if [ -z "$EXISTING_INSTALL" ]; then
-  printf '%s' "$TOKEN"    > "$TOKEN_FILE"
-  printf '%s' "$RECOVERY" > "$RECOVERY_FILE"
+  printf '%s' "$TOKEN" > "$TOKEN_FILE"
+  # Recovery is only known on a NEW account or a MOVE-via-phrase; a MOVE-via-code
+  # never sees it, so don't clobber any existing file with an empty value.
+  [ -n "$RECOVERY" ] && printf '%s' "$RECOVERY" > "$RECOVERY_FILE"
 fi
-chmod 600 "$TOKEN_FILE" "$RECOVERY_FILE" 2>/dev/null || :
+chmod 600 "$TOKEN_FILE" 2>/dev/null || :
+[ -s "$RECOVERY_FILE" ] && chmod 600 "$RECOVERY_FILE" 2>/dev/null || :
+
+# --------------------------------------------------------------------------
+# NEW ACCOUNT: show the identity + recovery phrase prominently and REQUIRE the
+# user to confirm they saved it BEFORE we wire anything or open the browser.
+# This is the one moment the recovery phrase is ever shown — losing it means
+# losing the account (unless another device is still signed in to link from).
+# --------------------------------------------------------------------------
+if [ "$CHOICE" = "new" ]; then
+  say ""
+  say "  ============================================================"
+  say "   SAVE THIS — your way back into your account"
+  say "  ============================================================"
+  say "   username:        $USERNAME"
+  say ""
+  say "   recovery phrase: $RECOVERY"
+  say ""
+  say "   You'll need the phrase (with your username) to sign in on"
+  say "   another device or if you lose this machine. It is shown"
+  say "   ONLY now. A copy is at $RECOVERY_FILE — but write it down."
+  say "  ============================================================"
+  say ""
+  while : ; do
+    printf "  type 'saved' once you've written down your recovery phrase: " > /dev/tty
+    IFS= read -r _ack < /dev/tty || die "could not read confirmation."
+    case "$(printf '%s' "$_ack" | tr 'A-Z' 'a-z' | tr -d '[:space:]')" in
+      saved) break ;;
+      *)     say "  please type 'saved' to continue." ;;
+    esac
+  done
+fi
 
 # --------------------------------------------------------------------------
 # Presence hook helper. One small script handles every Claude Code event, reads
@@ -762,6 +875,8 @@ say ""
 say "  ------------------------------------------------------------"
 if [ -n "$EXISTING_INSTALL" ]; then
   say "  re-wired existing install (identity unchanged)"
+elif [ -n "$MOVED" ]; then
+  say "  moved your account onto this device"
 else
   say "  installed as: $USERNAME"
 fi
@@ -776,19 +891,13 @@ case "$SHELL_WIRED" in
   already)   say "  cli agents:   covered — shell integration already in your rc (codex, aider, gemini, ...)" ;;
   *)         say "  cli agents:   covered — shell integration added to $SHELL_WIRED (codex, aider, gemini, ...)" ;;
 esac
+# A new account already saw + confirmed its recovery phrase above the gate; just
+# a one-line reminder of where the copy lives.
+if [ "$CHOICE" = "new" ]; then
+  say "  recovery:     phrase saved to $RECOVERY_FILE (you wrote it down above)"
+fi
 say "  ------------------------------------------------------------"
 say ""
-# Only print the recovery phrase on a fresh install (we generated it now). On a
-# re-wire we don't have it in hand and must not blank or reprint a stale one.
-if [ -z "$EXISTING_INSTALL" ]; then
-  say "  RECOVERY PHRASE — save this. It's the ONLY way to recover your name:"
-  say ""
-  say "      $RECOVERY"
-  say ""
-  say "  (also written to $RECOVERY_FILE)"
-  say "  ------------------------------------------------------------"
-  say ""
-fi
 
 if [ -n "$OPENED" ]; then
   say "  opening your browser — you'll land signed in."

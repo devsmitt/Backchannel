@@ -238,6 +238,14 @@
   .installblock .copybtn { flex: 0 0 auto; background: color-mix(in srgb, var(--live) 10%, transparent); border: 1px solid color-mix(in srgb, var(--live) 25%, transparent); color: var(--live); border-radius: 6px; font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer; }
   .installblock .copybtn:hover { background: color-mix(in srgb, var(--live) 18%, transparent); }
   .installblock .sub { font-family: var(--mono); font-size: 10.5px; line-height: 1.7; letter-spacing: 0.02em; color: var(--ghost); margin-top: 14px; }
+  .installblock .movehow { text-align: left; }
+  .installblock .movelabel { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint); margin-top: 16px; }
+  .installblock .movehow .tokenbox { margin-top: 12px; }
+  .installblock .movehow .editline { margin-top: 10px; }
+  .installblock .movehow .editline input { width: 100%; }
+  .installblock .movehow .gatebtn { margin-top: 12px; }
+  .installblock .orline { display: flex; align-items: center; gap: 12px; margin: 22px 0 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ghost); }
+  .installblock .orline::before, .installblock .orline::after { content: ""; height: 1px; background: var(--line); flex: 1; }
   #signinErr { margin-top: 16px; color: var(--danger); opacity: 0; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em; transition: opacity 240ms ease; min-height: 1em; }
   body.signin-error #signinErr { opacity: 0.95; }
   .signedas { margin-top: 20px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; color: var(--ghost); text-transform: uppercase; }
@@ -301,6 +309,11 @@
   .charcap { font-family: var(--mono); font-size: 10px; color: var(--ghost); }
   .edit-link { font-family: var(--mono); font-size: 11px; color: var(--faint); cursor: pointer; margin-top: 14px; display: inline-block; }
   .edit-link:hover { color: var(--live); }
+  .linkcode { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .linkcode .lc-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
+  .linkcode .lc-code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.22em; color: var(--live); margin: 8px 0 6px; user-select: all; }
+  .linkcode .lc-exp { font-family: var(--mono); font-size: 10.5px; color: var(--ghost); }
+  #linkDevice { margin-left: 16px; }
   .rotate-link { margin-left: 16px; }
   .rotate-link:hover { color: var(--danger); }
   .rotate-link.busy { color: var(--ghost); cursor: default; }
@@ -398,6 +411,31 @@
         <button class="gatebtn" id="signinBtn" type="button">enter</button>
       </div>
       <div id="signinErr">&nbsp;</div>
+
+      <!-- moving an existing account onto this device -->
+      <div class="installblock">
+        <button class="reveal" id="moveBtn" type="button">moving devices? &rarr;</button>
+        <div class="installsteps" id="moveSteps" hidden>
+          <div class="movehow">
+            <div class="movelabel">link from another device</div>
+            <div class="sub">On a device you're already signed in on: click your name (top-right) &rarr; <b>link a device</b>, then enter the code it shows you here.</div>
+            <div class="tokenbox">
+              <span class="caret">›</span>
+              <input id="linkCode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="device-link code" />
+              <button class="gatebtn" id="linkBtn" type="button">link</button>
+            </div>
+          </div>
+          <div class="orline">or recover with your phrase</div>
+          <div class="movehow">
+            <div class="sub">Lost all your devices? Use the recovery phrase you saved at sign-up.</div>
+            <div class="editline"><input class="field" id="recUser" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="username" /></div>
+            <div class="editline"><input class="field" id="recPhrase" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="recovery phrase (the words you saved)" /></div>
+            <button class="gatebtn" id="recBtn" type="button">recover account</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- brand new here -->
       <div class="installblock">
         <button class="reveal" id="newHereBtn" type="button">new here? &rarr;</button>
         <div class="installsteps" id="installSteps" hidden>
@@ -405,8 +443,8 @@
             <li>run this in your terminal
               <div class="cmd"><code id="installCmd"></code><button class="copybtn" id="copyInstall" type="button">copy</button></div>
             </li>
-            <li>claim a username when it asks</li>
-            <li>your browser opens — signed in. fire a prompt at your agent and you're in.</li>
+            <li>claim a username, then <b>save your recovery phrase</b> when it asks (it's how you sign in on other devices)</li>
+            <li>confirm you saved it — your browser opens, signed in. fire a prompt at your agent and you're in.</li>
           </ol>
           <div class="sub">one install signs you in on this browser for good. you appear in the channel only while your agent is working.</div>
         </div>
@@ -1039,7 +1077,9 @@
         '</div>' +
         (isYou
           ? '<span class="edit-link" id="editTagline">edit tagline</span>' +
-            '<span class="edit-link rotate-link" id="rotateToken">rotate token</span>'
+            '<span class="edit-link" id="linkDevice">link a device</span>' +
+            '<span class="edit-link rotate-link" id="rotateToken">rotate token</span>' +
+            '<div class="linkcode" id="linkCodeOut" hidden></div>'
           : '') +
       '</div>' +
       '<div class="stats">' +
@@ -1122,6 +1162,37 @@
   }
 
   function wireOwnProfileEdits(u) {
+    // ---- Link a device: mint a single-use code to sign in elsewhere ----
+    // Reuses the pairing endpoint: POST /pair/new {token} -> a short code the
+    // user types on their other device (sign-in screen -> "moving devices?").
+    // No secret is ever shown or typed — the code redeems to the token server-side.
+    const linkDevice = document.getElementById("linkDevice");
+    const linkOut = document.getElementById("linkCodeOut");
+    if (linkDevice && linkOut) {
+      linkDevice.addEventListener("click", () => {
+        if (!token) return;
+        linkDevice.style.pointerEvents = "none";
+        linkDevice.textContent = "linking…";
+        fetch("/pair/new", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: token }) })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => {
+            linkDevice.style.pointerEvents = "";
+            linkDevice.textContent = "link a device";
+            if (d && d.code) {
+              linkOut.hidden = false;
+              linkOut.innerHTML =
+                '<div class="lc-label">enter this on your other device → “moving devices?”</div>' +
+                '<div class="lc-code">' + esc(d.code) + '</div>' +
+                '<div class="lc-exp">expires in 5 minutes · single use</div>';
+            } else {
+              linkOut.hidden = false;
+              linkOut.innerHTML = '<div class="lc-exp">couldn’t create a code — try again</div>';
+            }
+          })
+          .catch(() => { linkDevice.style.pointerEvents = ""; linkDevice.textContent = "link a device"; });
+      });
+    }
+
     const editLink = document.getElementById("editTagline");
     if (editLink) {
       editLink.addEventListener("click", () => {
@@ -1256,6 +1327,62 @@
   signinBtn.addEventListener("click", submitToken);
   tokenInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitToken(); } });
   tokenInput.addEventListener("input", clearSigninError);
+
+  // ---- Portability: link a device / recover (sign-in screen) --------------
+  // A fresh 256-bit secret, minted in the browser for the recovery rebind. The
+  // server only ever stores its hash; the raw token stays local (like install).
+  function genToken() {
+    const a = new Uint8Array(32);
+    (crypto || window.crypto).getRandomValues(a);
+    return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  function adoptToken(t) {  // store + connect with a freshly-obtained token
+    token = t;
+    try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
+    reconnectDelay = 500;
+    connect();
+  }
+
+  // Reveal toggles (one open at a time keeps the card calm).
+  const moveBtn = document.getElementById("moveBtn");
+  const moveSteps = document.getElementById("moveSteps");
+  if (moveBtn && moveSteps) moveBtn.addEventListener("click", () => {
+    moveSteps.hidden = !moveSteps.hidden;
+    moveBtn.textContent = moveSteps.hidden ? "moving devices? →" : "moving devices? ↓";
+  });
+
+  // Device-link: redeem a short code minted on another signed-in device.
+  const linkCode = document.getElementById("linkCode");
+  const linkBtn  = document.getElementById("linkBtn");
+  function submitLink() {
+    const c = (linkCode.value || "").trim();
+    if (!c) return;
+    clearSigninError();
+    fetch("/pair/redeem", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: c }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && typeof d.token === "string" && d.token) adoptToken(d.token); else showSigninError("that code is invalid or expired"); })
+      .catch(() => showSigninError("couldn't link — try again"));
+  }
+  if (linkBtn)  linkBtn.addEventListener("click", submitLink);
+  if (linkCode) linkCode.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitLink(); } });
+
+  // Recover: username + the saved recovery phrase rebinds onto a new token here.
+  const recUser   = document.getElementById("recUser");
+  const recPhrase = document.getElementById("recPhrase");
+  const recBtn    = document.getElementById("recBtn");
+  function submitRecover() {
+    const u = (recUser.value || "").trim().toLowerCase();
+    const p = (recPhrase.value || "").trim();
+    if (!u || !p) return;
+    clearSigninError();
+    const newToken = genToken();
+    fetch("/recover", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, recovery: p, newToken: newToken }) })
+      .then((r) => { if (r.status === 200) return r.json(); if (r.status === 429) throw new Error("too many tries — wait a few minutes"); throw new Error("that username + phrase didn't match"); })
+      .then(() => adoptToken(newToken))
+      .catch((e) => showSigninError(e.message || "recovery failed"));
+  }
+  if (recBtn) recBtn.addEventListener("click", submitRecover);
+  if (recPhrase) recPhrase.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitRecover(); } });
 
   // ---- Composer (present only) --------------------------------------------
   let sending = false;  // re-entrancy guard while a pending image uploads
