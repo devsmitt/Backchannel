@@ -51,6 +51,8 @@ import {
   isMember,
   roomMemberIds,
   userPrivateRooms,
+  setArchived,
+  isArchivedFor,
   findOrCreatePrivateRoom,
   insertMessage,
   recentMessages,
@@ -960,6 +962,16 @@ function withInvites(data, userId) {
   return data ? { ...data, invites: invitesForUser(userId) } : data;
 }
 
+// A user's private rooms split into visible (active) vs archived (hidden).
+function privateRoomPayloads(userId) {
+  const all = userPrivateRooms(userId);
+  const map = (d) => ({ id: d.id, slug: d.slug, name: d.name, type: d.type, members: d.members });
+  return {
+    dms: all.filter((d) => !d.archived).map(map),
+    archived: all.filter((d) => d.archived).map(map),
+  };
+}
+
 // Send the last-50 history of a room to one socket (oldest first).
 function sendHistory(ws, room) {
   const rows = recentMessages(room.id, HISTORY_LIMIT);
@@ -1095,13 +1107,14 @@ wss.on('connection', (ws) => {
       attachSocket(user.id, ws);
 
       const rooms = listChannels().map((r) => ({ id: r.id, slug: r.slug, name: r.name, type: r.type }));
-      const dms = userPrivateRooms(user.id); // [{id,slug?,name,type,members}]
+      const priv = privateRoomPayloads(user.id);   // { dms, archived }
       try {
         ws.send(JSON.stringify({
           type: 'welcome',
           me: meBlock(user),
           rooms,
-          dms: dms.map((d) => ({ id: d.id, slug: d.slug, name: d.name, type: d.type, members: d.members })),
+          dms: priv.dms,
+          archived: priv.archived,
           present: isPresent(user.id),
           unread: unreadCountsForUser(user.id),
         }));
@@ -1212,11 +1225,34 @@ wss.on('connection', (ws) => {
       const room = findOrCreatePrivateRoom([...ids]);
       if (!room) { wsError(ws, 'could not open'); return; }
 
+      // The opener is actively opening it, so un-hide it for them.
+      setArchived(room.id, ws.userId, false);
+
       const payload = { type: 'room_opened', room: { id: room.id, slug: room.slug, name: room.name, type: room.type, members: room.members } };
-      // Notify every member who is currently connected, so the new room appears
-      // in their rail immediately (not just the opener).
+      // Surface it in each connected member's rail — but NOT for members who have
+      // it archived (other than the opener): their hidden chats stay hidden, they
+      // still receive the messages and see them when they open that area.
       const memberIds = new Set(roomMemberIds(room.id));
-      for (const mid of memberIds) pushToUser(mid, payload);
+      for (const mid of memberIds) {
+        if (mid === ws.userId || !isArchivedFor(room.id, mid)) pushToUser(mid, payload);
+      }
+      return;
+    }
+
+    // --- archive_dm / unarchive_dm: hide or restore a private room --------
+    // Archiving keeps you a member (you still receive messages) but removes it
+    // from your rail until you open "hidden chats". Echoes your fresh dm lists.
+    if (msg.type === 'archive_dm' || msg.type === 'unarchive_dm') {
+      if (!ws.userId) return;
+      const ref = msg.room;
+      let room = null;
+      if (typeof ref === 'number') room = roomById(ref);
+      else if (typeof ref === 'string') room = roomBySlug(ref.trim()) || roomById(Number(ref));
+      if (!room || room.type === 'channel') return;
+      if (!isMember(room.id, ws.userId)) return;
+      setArchived(room.id, ws.userId, msg.type === 'archive_dm');
+      const priv = privateRoomPayloads(ws.userId);
+      try { ws.send(JSON.stringify({ type: 'dms', dms: priv.dms, archived: priv.archived })); } catch {}
       return;
     }
 

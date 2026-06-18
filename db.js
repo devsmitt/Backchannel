@@ -78,8 +78,9 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS room_members (
-    room_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
+    room_id  INTEGER NOT NULL,
+    user_id  INTEGER NOT NULL,
+    archived INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (room_id, user_id)
   );
 
@@ -156,6 +157,9 @@ function migrate() {
 
   // messages: optional image attachment (a /uploads/<file> path).
   addColumnIfMissing('messages', 'image', 'image TEXT');
+
+  // room_members: per-user "archived" flag for hiding DMs/groups.
+  addColumnIfMissing('room_members', 'archived', 'archived INTEGER NOT NULL DEFAULT 0');
 
   // rooms: type + created_at. (position existed in v1.)
   addColumnIfMissing('rooms', 'type', "type TEXT DEFAULT 'channel'");
@@ -302,11 +306,18 @@ const stmtRoomMemberNames = db.prepare(
     WHERE rm.room_id = ? ORDER BY u.username ASC`
 );
 // All private rooms (dm/group) a user belongs to, with their member usernames.
+// rm.archived is THIS user's per-membership hide flag.
 const stmtUserPrivateRooms = db.prepare(
-  `SELECT r.id, r.slug, r.name, r.type
+  `SELECT r.id, r.slug, r.name, r.type, rm.archived AS archived
      FROM rooms r JOIN room_members rm ON rm.room_id = r.id
     WHERE rm.user_id = ? AND r.type IN ('dm','group')
     ORDER BY r.id ASC`
+);
+const stmtSetArchived = db.prepare(
+  'UPDATE room_members SET archived = ? WHERE room_id = ? AND user_id = ?'
+);
+const stmtIsArchived = db.prepare(
+  'SELECT archived FROM room_members WHERE room_id = ? AND user_id = ?'
 );
 
 const stmtListProjects = db.prepare(
@@ -609,7 +620,7 @@ export function roomMemberIds(roomId) {
   return stmtRoomMemberIds.all(roomId).map((r) => r.user_id);
 }
 
-/** All dm/group rooms a user belongs to, with member usernames attached. */
+/** All dm/group rooms a user belongs to, with member usernames + archived flag. */
 export function userPrivateRooms(userId) {
   const rows = stmtUserPrivateRooms.all(userId);
   return rows.map((r) => ({
@@ -617,8 +628,20 @@ export function userPrivateRooms(userId) {
     slug: r.slug,
     name: r.name,
     type: r.type,
+    archived: !!r.archived,
     members: roomMemberNames(r.id),
   }));
+}
+
+/** Archive (hide) or unarchive a private room for one user. */
+export function setArchived(roomId, userId, archived) {
+  stmtSetArchived.run(archived ? 1 : 0, roomId, userId);
+}
+
+/** Is this room archived for this user? */
+export function isArchivedFor(roomId, userId) {
+  const r = stmtIsArchived.get(roomId, userId);
+  return !!(r && r.archived);
 }
 
 /**
