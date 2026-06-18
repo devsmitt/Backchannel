@@ -64,7 +64,8 @@ db.exec(`
     total_builds   INTEGER DEFAULT 0,
     build_seconds  INTEGER DEFAULT 0,
     streak_days    INTEGER DEFAULT 0,
-    last_build_day TEXT    DEFAULT ''
+    last_build_day TEXT    DEFAULT '',
+    color          TEXT    DEFAULT ''
   );
 
   CREATE TABLE IF NOT EXISTS rooms (
@@ -151,6 +152,7 @@ function migrate() {
   addColumnIfMissing('users', 'build_seconds', 'build_seconds INTEGER DEFAULT 0');
   addColumnIfMissing('users', 'streak_days', 'streak_days INTEGER DEFAULT 0');
   addColumnIfMissing('users', 'last_build_day', "last_build_day TEXT DEFAULT ''");
+  addColumnIfMissing('users', 'color', "color TEXT DEFAULT ''");
 
   // messages: optional image attachment (a /uploads/<file> path).
   addColumnIfMissing('messages', 'image', 'image TEXT');
@@ -235,6 +237,7 @@ const stmtUserByName = db.prepare('SELECT * FROM users WHERE username = ?');
 const stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?');
 const stmtUpdateToken = db.prepare('UPDATE users SET token_hash = ? WHERE id = ?');
 const stmtSetTagline = db.prepare('UPDATE users SET tagline = ? WHERE id = ?');
+const stmtSetColor = db.prepare('UPDATE users SET color = ? WHERE id = ?');
 
 const stmtInsertMessage = db.prepare(
   'INSERT INTO messages (room_id, user_id, username, body, image, created_at) VALUES (?, ?, ?, ?, ?, ?)'
@@ -474,6 +477,12 @@ export function setTagline(userId, tagline) {
   stmtSetTagline.run(String(tagline).slice(0, CAPS.tagline), userId);
 }
 
+/** Set a user's identity color (a validated #rrggbb hex, or '' to clear). */
+export function setColor(userId, color) {
+  const hex = /^#[0-9a-fA-F]{6}$/.test(String(color)) ? String(color).toLowerCase() : '';
+  stmtSetColor.run(hex, userId);
+}
+
 // ---------------------------------------------------------------------------
 // Native builder status — accrued purely from gated build activity.
 // ---------------------------------------------------------------------------
@@ -559,7 +568,7 @@ export function touchActive(userId, now = Date.now()) {
 export function allUsersForRoster() {
   return db
     .prepare(
-      `SELECT id, username, tagline, streak_days AS streak, last_active
+      `SELECT id, username, tagline, streak_days AS streak, last_active, color
          FROM users
         ORDER BY last_active DESC, username ASC`
     )
@@ -821,6 +830,7 @@ export function profileByName(username) {
     totalBuilds: u.total_builds || 0,
     buildSeconds: u.build_seconds || 0,
     tagline: u.tagline || '',
+    color: u.color || '',
     projects: listProjects(u.id),
   };
 }

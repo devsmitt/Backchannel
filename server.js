@@ -40,6 +40,7 @@ import {
   updateToken,
   deleteUser,
   setTagline,
+  setColor,
   recordEnter,
   recordExit,
   touchActive,
@@ -306,7 +307,7 @@ function buildRoster(now = Date.now()) {
   const building = [];
   const offline = [];
   for (const u of allUsersForRoster()) {
-    const entry = { username: u.username, tagline: u.tagline || '', streak: u.streak || 0 };
+    const entry = { username: u.username, tagline: u.tagline || '', streak: u.streak || 0, color: u.color || '' };
     const agentActive = isPresent(u.id);
     const recent = u.last_active && now - u.last_active < BUILDING_WINDOW_MS;
     if (agentActive && hasOpenTab(u.id)) {
@@ -949,6 +950,7 @@ function meBlock(user) {
     totalBuilds: user.total_builds || 0,
     buildSeconds: user.build_seconds || 0,
     since: user.created_at,
+    color: user.color || '',
   };
 }
 
@@ -1172,6 +1174,15 @@ wss.on('connection', (ws) => {
       else if (typeof ref === 'string') room = roomBySlug(ref.trim()) || roomById(Number(ref));
       if (!room || !canAccessRoom(ws.userId, room)) return;
       setTyping(room, ws.userId, ws.username, !!msg.state);
+      return;
+    }
+
+    // --- set_color: your accent becomes your identity color for everyone --
+    if (msg.type === 'set_color') {
+      if (!ws.userId) return;
+      const hex = typeof msg.color === 'string' ? msg.color : '';
+      setColor(ws.userId, hex);   // validates the hex; '' clears it
+      broadcastRoster();          // roster carries colors -> everyone re-renders
       return;
     }
 
