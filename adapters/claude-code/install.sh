@@ -164,12 +164,26 @@ open_url() {
 
 # --------------------------------------------------------------------------
 # Username claim loop
+#
+# Idempotent: if this machine already has a token, we REUSE that identity and
+# just re-run the wiring (hooks/shell/sign-in). Re-running the installer must
+# never create a duplicate user or rotate your secret — it's the upgrade path.
 # --------------------------------------------------------------------------
 TOKEN=""
 RECOVERY=""
 USERNAME=""
+EXISTING_INSTALL=""
 
-while : ; do
+if [ -s "$TOKEN_FILE" ]; then
+  TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE" 2>/dev/null || printf '')"
+  if [ -n "$TOKEN" ]; then
+    EXISTING_INSTALL="yes"
+    [ -s "$RECOVERY_FILE" ] && RECOVERY="$(cat "$RECOVERY_FILE" 2>/dev/null || printf '')" || RECOVERY=""
+    say "  existing install found — keeping your identity, re-wiring hooks."
+  fi
+fi
+
+while [ -z "$EXISTING_INSTALL" ] ; do
   printf 'choose a username (2-24 chars, a-z 0-9 _ -): ' > /dev/tty
   IFS= read -r raw < /dev/tty || die "could not read username."
 
@@ -221,26 +235,81 @@ while : ; do
 done
 
 # --------------------------------------------------------------------------
-# Persist token + recovery locally (secrets — umask 077)
+# Persist token + recovery locally (secrets — umask 077). For an existing
+# install the files already hold the right values — don't overwrite (we'd blank
+# the recovery phrase), just ensure the dir + perms.
 # --------------------------------------------------------------------------
 umask 077
 mkdir -p "$CONFIG_DIR"
-printf '%s' "$TOKEN"    > "$TOKEN_FILE"
-printf '%s' "$RECOVERY" > "$RECOVERY_FILE"
+if [ -z "$EXISTING_INSTALL" ]; then
+  printf '%s' "$TOKEN"    > "$TOKEN_FILE"
+  printf '%s' "$RECOVERY" > "$RECOVERY_FILE"
+fi
 chmod 600 "$TOKEN_FILE" "$RECOVERY_FILE" 2>/dev/null || :
 
 # --------------------------------------------------------------------------
-# Wire Claude Code hooks (UserPromptSubmit -> /enter, Stop -> /exit)
-# Merge safely into ~/.claude/settings.json without clobbering existing config.
-# Each hook sends ONLY the token, backgrounded + --max-time 2 so Claude never
-# blocks, and de-duped so re-running the installer doesn't pile up entries.
+# Presence hook helper. One small script handles every Claude Code event, reads
+# the token + server from disk at runtime (so neither is duplicated into
+# settings.json), and forwards Claude's session_id so concurrent agents are
+# tracked independently — one ending never kicks you while another still builds.
+# --------------------------------------------------------------------------
+HOOK_SH="$CONFIG_DIR/hook.sh"
+# Persist the server origin early so hook.sh can read it (also re-written later
+# for the shell snippet; harmless to write twice).
+printf '%s' "$SERVER" > "$SERVER_FILE"
+
+# Quoted heredoc ('HOOKEOF') — nothing here is expanded by the installer; the
+# script reads token/server from $CONFIG_DIR at runtime.
+cat > "$HOOK_SH" <<'HOOKEOF'
+#!/bin/sh
+# Backchannel presence hook (Claude Code). One script, three events:
+#   prompt -> you fired a prompt (a real turn): presence + counts a "session"
+#   enter  -> heartbeat (PreToolUse) or answering a question: presence only
+#   exit   -> a turn/session ended: that session goes quiet
+# Claude pipes the hook JSON (with session_id) on stdin; we forward that id so
+# concurrent agents are tracked independently and one ending never kicks you out
+# while another is still building. Sends ONLY the token (read from disk),
+# backgrounded + capped at 2s, so Claude never blocks. Missing prereqs = no-op.
+set -eu
+EVENT="${1:-enter}"
+DIR="${BACKCHANNEL_CONFIG_DIR:-$HOME/.config/backchannel}"
+
+# session_id from the hook JSON on stdin (best-effort; empty if absent).
+SID="$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' 2>/dev/null | head -n1)"
+
+command -v curl >/dev/null 2>&1 || exit 0
+[ -r "$DIR/token" ] || exit 0
+TOKEN="$(tr -d '\r\n' < "$DIR/token" 2>/dev/null)"
+[ -n "$TOKEN" ] || exit 0
+SERVER="$(head -n1 "$DIR/server" 2>/dev/null | tr -d '\r\n')"
+SERVER="${SERVER%/}"
+[ -n "$SERVER" ] || exit 0
+
+case "$EVENT" in
+  exit) ENDPOINT="exit" ;;
+  *)    ENDPOINT="enter" ;;
+esac
+
+curl -sS -m 2 -X POST \
+  -H 'Content-Type: application/json' \
+  -d "{\"token\":\"$TOKEN\",\"session\":\"$SID\",\"event\":\"$EVENT\"}" \
+  "$SERVER/$ENDPOINT" >/dev/null 2>&1 &
+
+exit 0
+HOOKEOF
+chmod 644 "$HOOK_SH" 2>/dev/null || :
+
+# --------------------------------------------------------------------------
+# Wire Claude Code hooks into ~/.claude/settings.json (merge, never clobber;
+# de-duped so re-running the installer doesn't pile up entries). Each hook just
+# invokes hook.sh with its event name — the token lives only in the config dir.
 # --------------------------------------------------------------------------
 mkdir -p "$SETTINGS_DIR"
 
-# The exact shell commands the hooks run. Single quotes around the JSON body so
-# the token is sent verbatim; backgrounded with & and capped at 2s.
-ENTER_CMD="curl -sS -m 2 -X POST -H 'Content-Type: application/json' -d '{\"token\":\"$TOKEN\"}' '$SERVER/enter' >/dev/null 2>&1 &"
-EXIT_CMD="curl -sS -m 2 -X POST -H 'Content-Type: application/json' -d '{\"token\":\"$TOKEN\"}' '$SERVER/exit' >/dev/null 2>&1 &"
+# The exact shell commands the hooks run (token is NOT embedded — hook.sh reads it).
+PROMPT_CMD="sh \"$HOOK_SH\" prompt"
+ENTER_CMD="sh \"$HOOK_SH\" enter"
+EXIT_CMD="sh \"$HOOK_SH\" exit"
 
 # Back up an existing settings file before touching it.
 if [ -f "$SETTINGS_FILE" ]; then
@@ -252,12 +321,14 @@ merged_via=""
 # --- Preferred path: python3 (robust JSON merge + de-dupe) -----------------
 if command -v python3 >/dev/null 2>&1; then
   SETTINGS_FILE="$SETTINGS_FILE" \
+  PROMPT_CMD="$PROMPT_CMD" \
   ENTER_CMD="$ENTER_CMD" \
   EXIT_CMD="$EXIT_CMD" \
   python3 - <<'PYEOF' && merged_via="python3"
 import json, os, sys
 
 path       = os.environ["SETTINGS_FILE"]
+prompt_cmd = os.environ["PROMPT_CMD"]
 enter_cmd  = os.environ["ENTER_CMD"]
 exit_cmd   = os.environ["EXIT_CMD"]
 
@@ -280,10 +351,12 @@ if not isinstance(hooks, dict):
 data["hooks"] = hooks
 
 def is_backchannel(h):
-    """True if a hook entry points at our /enter or /exit endpoint."""
-    return (isinstance(h, dict)
-            and isinstance(h.get("command"), str)
-            and ("/enter" in h["command"] or "/exit" in h["command"]))
+    """True if a hook entry is one of ours — matches both the new hook.sh form
+    and any older inline curl /enter|/exit command (so re-running migrates)."""
+    if not (isinstance(h, dict) and isinstance(h.get("command"), str)):
+        return False
+    c = h["command"]
+    return ("backchannel" in c) or ("/enter" in c) or ("/exit" in c)
 
 def ensure(event, command, matcher="*"):
     """Rebuild the event's hook list: strip any prior Backchannel entry
@@ -308,17 +381,18 @@ def ensure(event, command, matcher="*"):
     })
     hooks[event] = rebuilt
 
-ensure("UserPromptSubmit", enter_cmd)
+# UserPromptSubmit is a real turn -> 'prompt' (presence + counts a session).
+ensure("UserPromptSubmit", prompt_cmd)
 ensure("Stop", exit_cmd)
 # Stop misses some endings (API errors -> StopFailure; app close -> SessionEnd).
-# Exit on those too, so presence isn't left stuck active. (Interrupts/silent
-# stalls fire no hook at all — the server's inactivity timeout catches those.)
+# Exit on those too, so a session is released. (Interrupts/silent stalls fire no
+# hook at all — the server's inactivity backstop reaps those.)
 ensure("StopFailure", exit_cmd)
 ensure("SessionEnd", exit_cmd)
-# PreToolUse on ALL tools = a heartbeat: it keeps you 'active' for the whole run
-# (and feeds the server's active-TTL so a turn that ends without a Stop still
-# self-heals). PostToolUse(AskUserQuestion) re-enters you the moment you answer a
-# question (answers fire PostToolUse, not UserPromptSubmit).
+# PreToolUse on ALL tools = the heartbeat that keeps a session alive through a
+# turn. PostToolUse(AskUserQuestion) re-asserts the moment you answer a question
+# (answers fire PostToolUse, not UserPromptSubmit). Both are 'enter' (presence
+# only — they must NOT inflate the session count).
 ensure("PreToolUse", enter_cmd, "*")
 ensure("PostToolUse", enter_cmd, "AskUserQuestion")
 
@@ -339,11 +413,12 @@ if [ -z "$merged_via" ] && command -v jq >/dev/null 2>&1; then
     _base="$_tmp.base"
   fi
   if jq \
+      --arg prompt "$PROMPT_CMD" \
       --arg enter "$ENTER_CMD" \
       --arg exitc "$EXIT_CMD" '
-      # Remove any prior Backchannel hook (identified by the /enter|/exit URL)
-      # from an event, dropping groups that become empty. Preserves all others.
-      def is_bc: (.command? // "") | (test("/enter") or test("/exit")) ;
+      # Remove any prior Backchannel hook (new hook.sh form or older inline
+      # curl /enter|/exit) from an event, dropping groups that become empty.
+      def is_bc: (.command? // "") | (test("backchannel") or test("/enter") or test("/exit")) ;
       def strip($evt):
         (.hooks[$evt] // [])
         | map(.hooks = ((.hooks? // []) | map(select(is_bc | not))))
@@ -351,7 +426,7 @@ if [ -z "$merged_via" ] && command -v jq >/dev/null 2>&1; then
       . as $root
       | .hooks = (.hooks // {})
       | .hooks.UserPromptSubmit = ( (strip("UserPromptSubmit"))
-          + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $enter } ] } ] )
+          + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $prompt } ] } ] )
       | .hooks.Stop = ( (strip("Stop"))
           + [ { "matcher": "*", "hooks": [ { "type": "command", "command": $exitc } ] } ] )
       | .hooks.StopFailure = ( (strip("StopFailure"))
@@ -376,13 +451,14 @@ if [ -z "$merged_via" ]; then
   if [ ! -s "$SETTINGS_FILE" ]; then
     # The hook commands contain backslashes and double-quotes (the embedded JSON
     # body). JSON-escape them (\ -> \\, " -> \") before writing into the file.
+    _prompt_j="$(json_escape "$PROMPT_CMD")"
     _enter_j="$(json_escape "$ENTER_CMD")"
     _exit_j="$(json_escape "$EXIT_CMD")"
     cat > "$SETTINGS_FILE" <<EOF
 {
   "hooks": {
     "UserPromptSubmit": [
-      { "matcher": "*", "hooks": [ { "type": "command", "command": "$_enter_j" } ] }
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "$_prompt_j" } ] }
     ],
     "Stop": [
       { "matcher": "*", "hooks": [ { "type": "command", "command": "$_exit_j" } ] }
@@ -407,9 +483,10 @@ EOF
     err ""
     err "  ! could not safely merge hooks: neither python3 nor jq is available,"
     err "    and $SETTINGS_FILE already exists (won't risk corrupting it)."
-    err "    Add these two hooks manually under .hooks:"
-    err "      UserPromptSubmit: $ENTER_CMD"
-    err "      Stop:             $EXIT_CMD"
+    err "    Add these hooks manually under .hooks (each runs hook.sh):"
+    err "      UserPromptSubmit: $PROMPT_CMD"
+    err "      PreToolUse(*):    $ENTER_CMD"
+    err "      Stop/SessionEnd:  $EXIT_CMD"
     merged_via="manual"
   fi
 fi
@@ -427,9 +504,8 @@ fi
 #      'source ~/.config/backchannel/backchannel.sh' line to the right rc file.
 # --------------------------------------------------------------------------
 
-# (1) Persist the server origin for the snippet to read. Not secret, but keep
-# the tidy 600 from the umask above; the snippet only needs to read it.
-printf '%s' "$SERVER" > "$SERVER_FILE"
+# (1) The server origin was already persisted to $SERVER_FILE earlier (for
+# hook.sh); the snippet reads the same file. Nothing to do here.
 
 # (2) Write the shell snippet. Quoted heredoc ('SHELLEOF') so NOTHING inside is
 # expanded by this installer — the snippet ships verbatim, exactly as authored.
@@ -684,7 +760,11 @@ fi
 # --------------------------------------------------------------------------
 say ""
 say "  ------------------------------------------------------------"
-say "  installed as: $USERNAME"
+if [ -n "$EXISTING_INSTALL" ]; then
+  say "  re-wired existing install (identity unchanged)"
+else
+  say "  installed as: $USERNAME"
+fi
 say "  token saved:  $TOKEN_FILE"
 if [ "$merged_via" = "manual" ]; then
   say "  hooks:        NOT wired automatically — see the note above"
@@ -698,13 +778,17 @@ case "$SHELL_WIRED" in
 esac
 say "  ------------------------------------------------------------"
 say ""
-say "  RECOVERY PHRASE — save this. It's the ONLY way to recover your name:"
-say ""
-say "      $RECOVERY"
-say ""
-say "  (also written to $RECOVERY_FILE)"
-say "  ------------------------------------------------------------"
-say ""
+# Only print the recovery phrase on a fresh install (we generated it now). On a
+# re-wire we don't have it in hand and must not blank or reprint a stale one.
+if [ -z "$EXISTING_INSTALL" ]; then
+  say "  RECOVERY PHRASE — save this. It's the ONLY way to recover your name:"
+  say ""
+  say "      $RECOVERY"
+  say ""
+  say "  (also written to $RECOVERY_FILE)"
+  say "  ------------------------------------------------------------"
+  say ""
+fi
 
 if [ -n "$OPENED" ]; then
   say "  opening your browser — you'll land signed in."
