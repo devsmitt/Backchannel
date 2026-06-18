@@ -205,7 +205,7 @@
   .daydiv { display: flex; align-items: center; gap: 14px; margin: 6px 0 16px; color: var(--ghost); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; }
   .daydiv::before, .daydiv::after { content: ""; height: 1px; background: var(--line); flex: 1; }
 
-  .msg { padding: 8px 0 2px; }
+  .msg { padding: 8px 0 2px; position: relative; }
   .msg.cont { padding: 1px 0 2px; }
   .msg .name { font-family: var(--mono); font-size: 12.5px; color: var(--dim); margin-bottom: 3px; }
   .msg .name .nm { cursor: pointer; }
@@ -227,9 +227,9 @@
   .rxn .rxn-e { font-size: 12.5px; }
   .rxn .rxn-n { font-family: var(--mono); font-size: 11px; color: var(--faint); }
   .rxn.on .rxn-n { color: var(--live); }
-  .rxn-add { width: 26px; height: 22px; border-radius: 11px; border: 1px solid var(--line); background: none; color: var(--faint); cursor: pointer; opacity: 0; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease; }
+  .rxn-add { position: absolute; top: 4px; right: 0; width: 26px; height: 22px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--faint); cursor: pointer; opacity: 0; display: inline-flex; align-items: center; justify-content: center; transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease; }
   .rxn-add::before { content: "+"; font-size: 15px; line-height: 1; }
-  .msg:hover .rxn-add { opacity: 0.55; }
+  .msg:hover .rxn-add { opacity: 0.6; }
   .rxn-add:hover { opacity: 1; color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent); }
   .rxn-picker { position: fixed; z-index: 60; display: flex; gap: 2px; padding: 6px; background: var(--rail); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 14px 36px rgba(0,0,0,0.45); }
   .rxn-pick { background: none; border: none; cursor: pointer; font-size: 18px; line-height: 1; padding: 5px 6px; border-radius: 7px; transition: background 100ms ease, transform 100ms ease; }
@@ -1110,11 +1110,26 @@
   function togglePeopleMenu() { (peopleMenuEl && peopleMenuEl.hidden) ? openPeopleMenu() : closePeopleMenu(); }
   if (nowCountBtnEl) nowCountBtnEl.addEventListener("click", (e) => { e.stopPropagation(); togglePeopleMenu(); });
 
+  // Any press/click outside the reaction picker (and not on a "+" button, whose
+  // own click re-opens/repositions it) closes it. Both events are wired so it can
+  // never get stuck open regardless of how the press lands.
+  function maybeCloseReactionPicker(e) {
+    if (!reactionPickerEl || reactionPickerEl.hidden) return;
+    if (reactionPickerEl.contains(e.target)) return;
+    if (e.target.closest && e.target.closest(".rxn-add")) return;
+    closeReactionPicker();
+  }
   document.addEventListener("click", (e) => {
     if (roomMenuEl && !roomMenuEl.hidden && !roomMenuEl.contains(e.target) && !roomTitleEl.contains(e.target)) closeRoomMenu();
     if (peopleMenuEl && !peopleMenuEl.hidden && !peopleMenuEl.contains(e.target) && !(nowCountBtnEl && nowCountBtnEl.contains(e.target))) closePeopleMenu();
-    if (reactionPickerEl && !reactionPickerEl.hidden && !reactionPickerEl.contains(e.target)) closeReactionPicker();
+    maybeCloseReactionPicker(e);
   });
+  // Capture phase so it sees EVERY press first — before any handler can
+  // stopPropagation — guaranteeing the picker can't get stuck open.
+  document.addEventListener("mousedown", maybeCloseReactionPicker, true);
+  document.addEventListener("touchstart", maybeCloseReactionPicker, true);
+  // Scrolling the stream detaches the (fixed) picker from its anchor — close it.
+  if (streamEl) streamEl.addEventListener("scroll", () => closeReactionPicker(), { passive: true });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeRoomMenu(); closePeopleMenu(); closeReactionPicker(); } });
 
   // ---- Rendering messages -------------------------------------------------
@@ -1159,6 +1174,13 @@
       a.appendChild(img);
       row.appendChild(a);
     }
+    // hover affordance: a "+" pinned to the message's top-right (absolute, so it
+    // adds no vertical space). Reaction CHIPS render below only when they exist.
+    const add = document.createElement("button");
+    add.type = "button"; add.className = "rxn-add"; add.title = "add reaction";
+    add.setAttribute("aria-label", "add reaction");
+    add.addEventListener("click", (e) => { e.stopPropagation(); openReactionPicker(add, row.dataset.mid); });
+    row.appendChild(add);
     renderReactions(row, m.reactions, m.mine);
     streamColEl.appendChild(row);
     lastSender = m.username;
@@ -1169,13 +1191,20 @@
   function msgRowById(id) { return streamColEl.querySelector('.msg[data-mid="' + String(id) + '"]'); }
   function sendReact(mid, emoji) { if (present && mid != null) send({ type: "react", messageId: Number(mid), emoji: emoji }); }
 
+  // Manages only the chips row — created lazily when reactions exist, removed
+  // entirely when there are none (so a reaction-less message takes no extra space).
   function renderReactions(row, reactions, mine) {
     if (!row) return;
+    const list = reactions || [];
     let wrap = row.querySelector(".rxns");
-    if (!wrap) { wrap = document.createElement("div"); wrap.className = "rxns"; row.appendChild(wrap); }
+    if (!list.length) { if (wrap) wrap.remove(); return; }
+    if (!wrap) {
+      wrap = document.createElement("div"); wrap.className = "rxns";
+      row.insertBefore(wrap, row.querySelector(".rxn-add"));   // before the absolute + button
+    }
     wrap.innerHTML = "";
     const mineSet = new Set(mine || []);
-    (reactions || []).forEach((r) => {
+    list.forEach((r) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "rxn" + (mineSet.has(r.emoji) ? " on" : "");
@@ -1183,11 +1212,6 @@
       b.addEventListener("click", (e) => { e.stopPropagation(); sendReact(row.dataset.mid, r.emoji); });
       wrap.appendChild(b);
     });
-    const add = document.createElement("button");
-    add.type = "button"; add.className = "rxn-add"; add.title = "add reaction";
-    add.setAttribute("aria-label", "add reaction");
-    add.addEventListener("click", (e) => { e.stopPropagation(); openReactionPicker(add, row.dataset.mid); });
-    wrap.appendChild(add);
   }
 
   function onReaction(m) {
