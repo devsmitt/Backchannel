@@ -78,7 +78,20 @@
 
   /* ============================================================ PRESENT: the app */
   .app { display: none; grid-template-rows: auto 1fr; height: 100vh; }
-  body.present .app { display: grid; }
+  /* The app is also rendered (behind the closed doors) while not-present, so the
+     doors slide shut OVER the live channel when you fade out. Only interactive,
+     and only on top, once you're actually present. */
+  body.present .app, body.notpresent .app { display: grid; }
+
+  /* ---- The doors: black panels that part to reveal the channel ---- */
+  .doors { display: none; position: fixed; inset: 0; z-index: 20; pointer-events: none; }
+  body.present .doors, body.notpresent .doors { display: block; }
+  .door { position: absolute; top: 0; bottom: 0; width: 51%; background: var(--bg); will-change: transform; transition: transform 720ms cubic-bezier(0.76, 0, 0.24, 1); }
+  .door.left { left: 0; }
+  .door.right { right: 0; }
+  body.present .door.left { transform: translateX(-100%); }
+  body.present .door.right { transform: translateX(100%); }
+  @media (prefers-reduced-motion: reduce) { .door { transition: none; } }
 
   header {
     display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
@@ -234,10 +247,18 @@
 
   .gatecard { width: 100%; max-width: 460px; text-align: center; }
   .gate .wordmark { justify-content: center; display: flex; margin-bottom: 18px; }
-  .gate.notpresent .gatecard { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-  .gate.notpresent .wordmark { margin-bottom: 6px; }
+  /* not-in-channel: a fixed overlay above the doors, with even rhythm and a
+     quiet builder count pinned to the bottom. */
+  .gate.notpresent { position: fixed; inset: 0; z-index: 30; }
+  .gate.notpresent .gatecard { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .gate.notpresent .wordmark { margin: 0; }
   .gate.notpresent h2 { margin: 0; }
-  .gate.notpresent .signedas { margin-top: 2px; }
+  .gate.notpresent .signedas { margin: 0; }
+  body.notpresent .gate.notpresent .gatecard { animation: gateIn 380ms ease 460ms both; }
+  body.notpresent .gate.notpresent .gate-foot { animation: gateIn 380ms ease 540ms both; }
+  @keyframes gateIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .gate-foot { position: absolute; left: 0; right: 0; bottom: 34px; display: flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ghost); }
+  .gate-foot .foot-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 8px color-mix(in srgb, var(--live) 60%, transparent); }
   .gateglyph {
     width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 24px;
     border: 1px solid var(--ghost); display: flex; align-items: center; justify-content: center;
@@ -248,20 +269,14 @@
   .gate h2 { margin: 0 0 12px; font-family: var(--mono); font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
   .gate p { margin: 0 auto; font-size: 14px; line-height: 1.65; color: var(--faint); max-width: 42ch; }
 
-  /* lander concept (signed-out) */
-  /* lander — "the room breathes": a pulsing orb, the name, one line, a live count */
-  .lander-mark { font-family: var(--mono); font-size: 19px; letter-spacing: 0.36em; text-transform: uppercase; color: var(--text); margin-top: 28px; }
-  .lander-line { margin: 14px auto 0; font-size: 17px; line-height: 1.6; color: var(--dim); max-width: 28ch; }
-  .lander-sub { margin: 22px auto 0; font-size: 13px; line-height: 1.7; color: var(--faint); max-width: 42ch; }
+  /* lander concept (signed-out) — the name, one line, a quiet live count */
+  .lander-mark { font-family: var(--mono); font-size: 19px; letter-spacing: 0.36em; text-transform: uppercase; color: var(--text); margin-top: 8px; }
+  .lander-line { margin: 14px auto 0; font-size: 17px; line-height: 1.6; color: var(--dim); max-width: 30ch; }
+  .lander-sub { margin: 22px auto 0; font-size: 13px; line-height: 1.7; color: var(--faint); max-width: 44ch; }
   .lander-note { margin: 28px auto 0; font-family: var(--mono); font-size: 11px; line-height: 1.6; letter-spacing: 0.02em; color: var(--ghost); max-width: 40ch; }
 
-  .orb { position: relative; width: 14px; height: 14px; margin: 8px auto 0; border-radius: 50%; background: var(--live); box-shadow: 0 0 22px 3px color-mix(in srgb, var(--live) 55%, transparent); }
-  .orb::before, .orb::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--live) 50%, transparent); animation: orbping 3.4s ease-out infinite; }
-  .orb::after { animation-delay: 1.7s; }
-  @keyframes orbping { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(6); opacity: 0; } }
-
-  .pulse { display: inline-flex; align-items: center; margin: 24px auto 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--dim); }
-  @media (prefers-reduced-motion: reduce) { .orb::before, .orb::after { display: none; } }
+  .pulse { display: inline-flex; align-items: center; gap: 8px; margin: 22px auto 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--dim); }
+  .pulse::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 8px color-mix(in srgb, var(--live) 60%, transparent); }
 
   .installblock { margin: 28px auto 0; max-width: 380px; text-align: left; }
   .installblock .reveal { display: block; margin: 0 auto; background: none; border: none; cursor: pointer; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.12em; color: var(--dim); padding: 6px; }
@@ -495,11 +510,10 @@
   <!-- ============================== SIGNED-OUT ============================== -->
   <div class="gate signin">
     <div class="gatecard">
-      <div class="orb" aria-hidden="true"></div>
       <div class="lander-mark">backchannel</div>
-      <p class="lander-line">a room that's only open while you build.</p>
+      <p class="lander-line">a room for builders, only open while building.</p>
       <div class="pulse" id="pulse" hidden><span id="pulseText"></span></div>
-      <p class="lander-sub">install a hook, fire a prompt, and you appear in the channel while your agent works. when it stops, you fade. no lurking; everyone here is mid-build.</p>
+      <p class="lander-sub">install a quick hook, fire a prompt in any environment, and you'll enter the backchannel. when your agent stops, you fade. no lurking. everyone here is mid-build.</p>
       <div id="signinErr">&nbsp;</div>
 
       <!-- brand new here -->
@@ -552,6 +566,13 @@
        main screen since users never handle the raw token in normal use. -->
   <input type="hidden" id="tokenInput" /><button type="button" id="signinBtn" hidden></button>
 
+  <!-- The backchannel doors: two black panels that part to reveal the channel
+       when you become present, and slide back to cover it when you fade out. -->
+  <div class="doors" aria-hidden="true">
+    <div class="door left"></div>
+    <div class="door right"></div>
+  </div>
+
   <!-- ============================== NOT PRESENT (building / offline) ============================== -->
   <div class="gate notpresent">
     <div class="gatecard">
@@ -559,6 +580,7 @@
       <h2>not in the channel</h2>
       <div class="signedas" id="notpresentWho">&nbsp;</div>
     </div>
+    <div class="gate-foot" id="notpresentCount" aria-live="polite"></div>
   </div>
 
   <!-- ============================== PROFILE OVERLAY ============================== -->
@@ -697,6 +719,7 @@
   }
   function showNotPresent() {
     setBodyState("notpresent");
+    fetchPulse();   // refresh the bottom builder count right away
   }
   function showPresent() {
     setBodyState("present");
@@ -2096,19 +2119,20 @@
     } catch (_) {}
   }
 
-  // ---- Lander pulse: live "N building now" heartbeat ----------------------
+  // ---- Live builder count: shown on the lander and the not-in-channel screen ---
   function renderPulse(d) {
-    const el = document.getElementById("pulse");
-    const txt = document.getElementById("pulseText");
-    if (!el || !txt) return;
     const n = d && typeof d.building === "number" ? d.building : 0;
-    txt.textContent = n > 0
+    const label = n > 0
       ? n + (n === 1 ? " builder in the backchannel" : " builders in the backchannel")
       : "the backchannel is quiet right now";
-    el.hidden = false;
+    const el = document.getElementById("pulse");
+    const txt = document.getElementById("pulseText");
+    if (el && txt) { txt.textContent = label; el.hidden = false; }
+    const foot = document.getElementById("notpresentCount");
+    if (foot) foot.innerHTML = (n > 0 ? '<span class="foot-dot"></span>' : "") + esc(label);
   }
   function fetchPulse() {
-    if (!body.classList.contains("signedout")) return;   // only the lander shows it
+    if (body.classList.contains("present")) return;   // only the calm screens show it
     fetch("/pulse").then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) renderPulse(d); }).catch(() => {});
   }
   fetchPulse();
