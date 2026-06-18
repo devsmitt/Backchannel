@@ -23,6 +23,7 @@
   */
 
   :root {
+    color-scheme: dark;
     --bg:      #0a0b0d;
     --rail:    #0c0d10;
     --text:    #edeef0;
@@ -32,10 +33,32 @@
     --line:    rgba(255,255,255,0.06);
     --hover:   rgba(255,255,255,0.03);
     --sel:     rgba(255,255,255,0.05);
-    --live:    #5fd99a;      /* the ONE accent: live/active + you + unread */
+    --surface: rgba(255,255,255,0.05);   /* subtle raised panels: code spans, inputs */
+    /* Accent: --accent is the user's raw pick (set inline + persisted in
+       localStorage); --live is the token the whole UI reads. Dark theme uses it
+       bright; light theme darkens it for contrast on a pale background. */
+    --accent:  #5fd99a;
+    --live:    var(--accent);
     --danger:  #d98b8b;
     --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  /* LIGHT THEME — toggled by html.theme-light (applied pre-paint to avoid flash). */
+  html.theme-light {
+    color-scheme: light;
+    --bg:      #f7f8fa;
+    --rail:    #eceef2;
+    --text:    #1a1c1f;
+    --dim:     #565c63;
+    --faint:   #888e96;
+    --ghost:   #aeb4bc;
+    --line:    rgba(0,0,0,0.10);
+    --hover:   rgba(0,0,0,0.035);
+    --sel:     rgba(0,0,0,0.055);
+    --surface: rgba(0,0,0,0.045);
+    --live:    color-mix(in srgb, var(--accent) 66%, #14171b);
+    --danger:  #c0504d;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
@@ -49,7 +72,7 @@
 
   /* ---- shared dot indicators ---- */
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
-  .dot.live { background: var(--live); box-shadow: 0 0 0 3px rgba(95,217,154,0.14); }
+  .dot.live { background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 14%, transparent); }
   .dot.building { background: var(--faint); }
   .dot.offline { background: transparent; border: 1px solid var(--ghost); }
 
@@ -78,7 +101,18 @@
   .body { display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
 
   /* ---- left rail: rooms + direct + presence ---- */
-  aside { background: var(--rail); border-right: 1px solid var(--line); overflow-y: auto; padding: 20px 0 28px; scrollbar-width: thin; }
+  aside { background: var(--rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .railscroll { flex: 1 1 auto; overflow-y: auto; padding: 20px 0 12px; scrollbar-width: thin; }
+
+  /* theme bar pinned to the bottom of the rail, inline with the composer band */
+  .themebar { flex: 0 0 auto; border-top: 1px solid var(--line); padding: 14px 18px; display: flex; align-items: center; gap: 12px; min-height: 26px; }
+  .theme-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; background: none; border: 1px solid var(--line); color: var(--dim); cursor: pointer; }
+  .theme-toggle:hover { color: var(--text); border-color: var(--ghost); }
+  .theme-toggle svg { width: 14px; height: 14px; }
+  .swatches { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .swatch { width: 14px; height: 14px; border-radius: 50%; background: var(--sw); border: none; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3); transition: transform 120ms ease; }
+  .swatch:hover { transform: scale(1.18); }
+  .swatch.sel { box-shadow: 0 0 0 2px var(--rail), 0 0 0 3.5px var(--sw); }
   .section { margin-bottom: 22px; }
   .sechead { display:flex; justify-content:space-between; align-items:center; padding: 0 22px; margin-bottom: 8px; }
   .sechead .label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--faint); }
@@ -129,18 +163,40 @@
   .msg .text { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
   .msg .text a { color: var(--live); text-decoration: none; }
   .msg .text a:hover { text-decoration: underline; }
-  .msg .text code { font-family: var(--mono); font-size: 12.5px; background: rgba(255,255,255,0.06); border: 1px solid var(--line); border-radius: 4px; padding: 0.5px 5px; }
-  .msg .text pre.code { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; background: rgba(255,255,255,0.045); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 6px 0 4px; overflow-x: auto; white-space: pre; scrollbar-width: thin; }
+  .msg .text code { font-family: var(--mono); font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0.5px 5px; }
+  .msg .text pre.code { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 6px 0 4px; overflow-x: auto; white-space: pre; scrollbar-width: thin; }
   .msg .text pre.code code { background: none; border: none; padding: 0; font-size: 12.5px; }
 
   .convo-empty { color: var(--faint); font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.04em; padding: 8px 0; }
 
-  .compose { border-top: 1px solid var(--line); padding: 15px 40px 6px; }
-  .compose .col { display: flex; align-items: center; gap: 12px; }
-  .compose .caret { color: var(--live); font-family: var(--mono); }
-  .compose input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font: inherit; }
-  .compose input::placeholder { color: var(--faint); }
-  .compose { padding-bottom: 16px; }
+  .compose { border-top: 1px solid var(--line); padding: 14px 40px; }
+  /* the composer spans the full width (not capped to the 660px message column),
+     so the input can run well to the right — stopping with a buffer before the
+     typing indicator parked at the far right. */
+  .compose .col { display: flex; flex-direction: column; gap: 9px; max-width: none; }
+  .compose .inputrow { display: flex; align-items: center; gap: 11px; min-height: 26px; }
+  .compose .caret { color: var(--live); font-family: var(--mono); flex: 0 0 auto; }
+  .compose input#say { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font: inherit; }
+  .compose input#say::placeholder { color: var(--faint); }
+  /* typing indicator — inline at the right so the composer stays one row tall
+     (keeps its top border aligned with the theme bar across the rail) */
+  .compose .typing { flex: 0 0 auto; margin-left: 22px; max-width: 40%; font-family: var(--mono); font-size: 11.5px; color: var(--faint); letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 140ms ease; }
+  .compose .typing.on { opacity: 0.85; }
+  .compose .attach { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; color: var(--faint); cursor: pointer; padding: 0; border-radius: 6px; }
+  .compose .attach svg { width: 18px; height: 18px; }
+  .compose .attach:hover { color: var(--live); }
+  .compose .attach.busy { color: var(--ghost); cursor: default; }
+  /* pending attachment chip — shown above the input until the message is sent */
+  .compose .attachpreview:not([hidden]) { display: flex; }
+  .compose .attachpreview .thumb { position: relative; display: inline-block; }
+  .compose .attachpreview img { display: block; max-height: 72px; max-width: 180px; width: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .compose .attachpreview .rm { position: absolute; top: -7px; right: -7px; width: 19px; height: 19px; border-radius: 50%; background: var(--rail); border: 1px solid var(--ghost); color: var(--dim); cursor: pointer; font-size: 13px; line-height: 1; display: flex; align-items: center; justify-content: center; padding: 0; }
+  .compose .attachpreview .rm:hover { color: var(--text); border-color: var(--text); }
+  body.dragging .stream { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--live) 40%, transparent); border-radius: 8px; }
+
+  /* image attachments in the stream */
+  .msg .msgimg { display: block; margin: 6px 0 2px; max-width: min(420px, 100%); max-height: 360px; width: auto; height: auto; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; background: var(--rail); }
+  .msg .msgimg:hover { border-color: var(--ghost); }
 
   /* ============================================================ SIGNED-OUT + NOT-PRESENT (calm states) */
   .gate { display: none; min-height: 100vh; align-items: center; justify-content: center; padding: 28px 22px; }
@@ -158,8 +214,8 @@
     border: 1px solid var(--ghost); display: flex; align-items: center; justify-content: center;
   }
   .gateglyph .core { width: 9px; height: 9px; border-radius: 50%; background: var(--ghost); }
-  .gateglyph.lit { border-color: rgba(95,217,154,0.35); }
-  .gateglyph.lit .core { background: var(--live); box-shadow: 0 0 10px rgba(95,217,154,0.6); }
+  .gateglyph.lit { border-color: color-mix(in srgb, var(--live) 35%, transparent); }
+  .gateglyph.lit .core { background: var(--live); box-shadow: 0 0 10px color-mix(in srgb, var(--live) 60%, transparent); }
   .gate h2 { margin: 0 0 12px; font-family: var(--mono); font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
   .gate p { margin: 0 auto; font-size: 14px; line-height: 1.65; color: var(--faint); max-width: 42ch; }
 
@@ -176,11 +232,11 @@
   .installblock ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
   .installblock ol.steps li { position: relative; padding-left: 26px; margin-bottom: 14px; font-size: 13px; line-height: 1.55; color: var(--dim); }
   .installblock ol.steps li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 0; width: 17px; height: 17px; border: 1px solid var(--line); border-radius: 50%; font-family: var(--mono); font-size: 10px; color: var(--faint); display: flex; align-items: center; justify-content: center; }
-  .installblock .cmd { display: flex; align-items: center; gap: 0.6em; margin-top: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text); background: rgba(255,255,255,0.04); border: 1px solid var(--line); border-radius: 8px; padding: 10px 10px 10px 13px; }
+  .installblock .cmd { display: flex; align-items: center; gap: 0.6em; margin-top: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 10px 10px 13px; }
   .installblock .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
   .installblock .cmd code::-webkit-scrollbar { display: none; }
-  .installblock .copybtn { flex: 0 0 auto; background: rgba(95,217,154,0.1); border: 1px solid rgba(95,217,154,0.25); color: var(--live); border-radius: 6px; font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer; }
-  .installblock .copybtn:hover { background: rgba(95,217,154,0.18); }
+  .installblock .copybtn { flex: 0 0 auto; background: color-mix(in srgb, var(--live) 10%, transparent); border: 1px solid color-mix(in srgb, var(--live) 25%, transparent); color: var(--live); border-radius: 6px; font-family: var(--mono); font-size: 11px; padding: 4px 9px; cursor: pointer; }
+  .installblock .copybtn:hover { background: color-mix(in srgb, var(--live) 18%, transparent); }
   .installblock .sub { font-family: var(--mono); font-size: 10.5px; line-height: 1.7; letter-spacing: 0.02em; color: var(--ghost); margin-top: 14px; }
   #signinErr { margin-top: 16px; color: var(--danger); opacity: 0; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em; transition: opacity 240ms ease; min-height: 1em; }
   body.signin-error #signinErr { opacity: 0.95; }
@@ -191,8 +247,10 @@
   .overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 40; align-items: flex-start; justify-content: center; padding: 60px 22px; overflow-y: auto; }
   body.profile-open .overlay-bg { display: flex; }
   .profile { width: 100%; max-width: 520px; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; padding: 0; overflow: hidden; }
-  .profile-head { padding: 26px 28px 20px; border-bottom: 1px solid var(--line); position: relative; }
-  .profile-close { position: absolute; top: 18px; right: 20px; background: none; border: none; color: var(--faint); font-size: 20px; cursor: pointer; line-height: 1; }
+  .profile-head { padding: 26px 28px 22px; border-bottom: 1px solid var(--line); position: relative; }
+  /* top-right cluster: message action + close, tucked neatly together */
+  .profile-actions { position: absolute; top: 18px; right: 18px; display: flex; align-items: center; gap: 8px; }
+  .profile-close { background: none; border: none; color: var(--faint); font-size: 20px; cursor: pointer; line-height: 1; padding: 2px 4px; }
   .profile-close:hover { color: var(--text); }
   .profile-handle { font-family: var(--mono); font-size: 18px; color: var(--text); letter-spacing: 0.02em; }
   .profile-handle.you { color: var(--live); }
@@ -200,9 +258,10 @@
   .profile-tagline { color: var(--dim); margin-top: 12px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
   .profile-tagline.placeholder { color: var(--ghost); font-style: italic; }
 
-  /* primary action: message another builder */
-  .profile-message { margin-top: 18px; font-family: var(--mono); font-size: 13px; letter-spacing: 0.04em; color: var(--bg); background: var(--live); border: none; border-radius: 7px; padding: 9px 18px; font-weight: 600; cursor: pointer; }
-  .profile-message:hover { filter: brightness(1.07); }
+  /* message action: a small, quiet icon pill tucked top-right (not a slab button) */
+  .profile-message { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: lowercase; color: var(--live); background: color-mix(in srgb, var(--live) 10%, transparent); border: 1px solid color-mix(in srgb, var(--live) 25%, transparent); border-radius: 6px; padding: 5px 11px 5px 9px; cursor: pointer; }
+  .profile-message:hover { background: color-mix(in srgb, var(--live) 18%, transparent); }
+  .profile-message svg { width: 13px; height: 13px; flex: 0 0 auto; }
 
   .stats { display: flex; padding: 22px 28px; border-bottom: 1px solid var(--line); }
   .stat { flex: 1; text-align: center; }
@@ -226,9 +285,9 @@
   .noprojects { font-family: var(--mono); font-size: 12px; color: var(--ghost); }
 
   /* editable bits (own profile) */
-  .field { background: rgba(255,255,255,0.04); border: 1px solid var(--line); border-radius: 8px; color: var(--text); font: inherit; padding: 10px 12px; outline: none; resize: vertical; transition: border-color 140ms ease, box-shadow 140ms ease; }
+  .field { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: var(--text); font: inherit; padding: 10px 12px; outline: none; resize: vertical; transition: border-color 140ms ease, box-shadow 140ms ease; }
   .field::placeholder { color: var(--faint); }
-  .field:focus { border-color: var(--live); box-shadow: 0 0 0 3px rgba(95,217,154,0.12); }
+  .field:focus { border-color: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 12%, transparent); }
   textarea.field { font-size: 13.5px; min-height: 40px; line-height: 1.5; }
 
   .edit-row { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
@@ -260,6 +319,19 @@
   }
   @media (prefers-reduced-motion: reduce) { .reconn .pip { animation: none; } }
 </style>
+<script>
+  // Apply the saved theme + accent BEFORE first paint so there's no flash of the
+  // wrong palette. Mirrors the keys the main script reads/writes below.
+  (function () {
+    try {
+      if (localStorage.getItem("backchannel-theme") === "light")
+        document.documentElement.classList.add("theme-light");
+      var a = localStorage.getItem("backchannel-accent");
+      if (a && /^#[0-9a-fA-F]{6}$/.test(a))
+        document.documentElement.style.setProperty("--accent", a);
+    } catch (e) {}
+  })();
+</script>
 </head>
 <body class="signedout">
 
@@ -274,19 +346,27 @@
 
     <div class="body">
       <aside>
-        <div class="section">
-          <div class="sechead"><span class="label">rooms</span></div>
-          <div id="roomList"></div>
+        <div class="railscroll">
+          <div class="section">
+            <div class="sechead"><span class="label">channels</span></div>
+            <div id="roomList"></div>
+          </div>
+
+          <div class="section" id="dmSection" style="display:none">
+            <div class="sechead"><span class="label">direct</span></div>
+            <div id="dmList"></div>
+          </div>
+
+          <div class="section">
+            <div class="sechead"><span class="label">who's building</span><span class="label" id="rosterCount">0</span></div>
+            <div id="roster"></div>
+          </div>
         </div>
 
-        <div class="section" id="dmSection" style="display:none">
-          <div class="sechead"><span class="label">direct</span></div>
-          <div id="dmList"></div>
-        </div>
-
-        <div class="section">
-          <div class="sechead"><span class="label">who's building</span><span class="label" id="rosterCount">0</span></div>
-          <div id="roster"></div>
+        <!-- theme bar: light/dark toggle + accent swatches, pinned bottom-left -->
+        <div class="themebar">
+          <button class="theme-toggle" id="themeToggle" type="button" title="toggle theme"></button>
+          <div class="swatches" id="swatches"></div>
         </div>
       </aside>
 
@@ -301,7 +381,7 @@
           <div class="col" id="streamCol"></div>
         </div>
 
-        <div class="compose"><div class="col"><span class="caret">›</span><input id="say" maxlength="1000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="message…" /></div></div>
+        <div class="compose"><div class="col"><div class="attachpreview" id="attachPreview" hidden></div><div class="inputrow"><button class="attach" id="attachBtn" type="button" title="attach an image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button><span class="caret">›</span><input id="say" maxlength="1000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="message…" /><span class="typing" id="typingline"></span></div></div><input type="file" id="fileInput" accept="image/png,image/jpeg,image/gif,image/webp" hidden /></div>
       </main>
     </div>
   </div>
@@ -374,6 +454,7 @@
   const streamEl      = document.getElementById("stream");
   const streamColEl   = document.getElementById("streamCol");
   const sayEl         = document.getElementById("say");
+  const typingEl      = document.getElementById("typingline");
   const tokenInput    = document.getElementById("tokenInput");
   const signinBtn     = document.getElementById("signinBtn");
   const notpresentWho  = document.getElementById("notpresentWho");
@@ -411,7 +492,7 @@
   function setFavicon(hasUnread) {
     let link = document.getElementById("favicon");
     if (!link) { link = document.createElement("link"); link.id = "favicon"; link.rel = "icon"; document.head.appendChild(link); }
-    link.href = faviconSvg(hasUnread ? "#5fd99a" : "#565b61");
+    link.href = faviconSvg(hasUnread ? currentAccent() : "#565b61");
   }
   function updateTitle() {
     const n = totalUnread();
@@ -489,12 +570,17 @@
       const room = currentRoom || (rooms[0] && rooms[0].slug);
       if (room) joinRoom(room);
     } else if (signedIn) {
+      stopTyping();
+      clearTypingIndicator();
       showNotPresent();
     }
   }
 
   // ---- Helpers ------------------------------------------------------------
   function roomKey(r) { return r.slug || String(r.id); }
+  // Channel display name: we render the "#" glyph ourselves, so strip any leading
+  // "#" the stored name may carry — otherwise we'd get a double hash (##general).
+  function channelName(r) { return String((r && (r.name || r.slug)) || "").replace(/^#+\s*/, ""); }
   function findRoom(key) {
     return rooms.find((r) => roomKey(r) === key) ||
            dms.find((r) => String(r.id) === key || r.slug === key) || null;
@@ -529,7 +615,7 @@
       div.className = "row" + (key === currentRoom ? " sel" : "");
       div.innerHTML =
         '<span class="hash">#</span>' +
-        '<span class="rname">' + esc(r.name || r.slug) + '</span>';
+        '<span class="rname">' + esc(channelName(r)) + '</span>';
       const u = unread[key] || 0;
       if (u > 0 && key !== currentRoom) {
         const b = document.createElement("span");
@@ -668,6 +754,9 @@
 
   // ---- Room switching -----------------------------------------------------
   function joinRoom(key) {
+    stopTyping();              // tell the old room we stopped
+    clearTypingIndicator();    // and clear whatever the old room was showing
+    clearPending();            // a staged attachment belongs to the room you left
     currentRoom = key;
     unread[key] = 0;
     updateTitle();
@@ -688,7 +777,7 @@
       roomTitleEl.textContent = "@" + (label || "direct");
       roomTopicEl.textContent = r.type === "group" ? "group" : "direct message";
     } else {
-      roomTitleEl.textContent = "#" + (r.name || r.slug);
+      roomTitleEl.textContent = "#" + channelName(r);
       roomTopicEl.textContent = topicFor(r.slug || r.name);
     }
   }
@@ -720,10 +809,26 @@
       });
       row.appendChild(nameEl);
     }
-    const textEl = document.createElement("div");
-    textEl.className = "text";
-    textEl.innerHTML = formatBody(m.body);  // formatBody escapes first, then adds only safe code/link tags
-    row.appendChild(textEl);
+    if (m.body) {
+      const textEl = document.createElement("div");
+      textEl.className = "text";
+      textEl.innerHTML = formatBody(m.body);  // formatBody escapes first, then adds only safe code/link tags
+      row.appendChild(textEl);
+    }
+    // Image attachment: render ONLY a path we recognize as our own upload, so a
+    // crafted message can never point an <img> at an arbitrary/tracking URL.
+    if (m.image && /^\/uploads\/[A-Za-z0-9_-]+\.(png|jpg|jpeg|gif|webp)$/.test(m.image)) {
+      const a = document.createElement("a");
+      a.href = m.image; a.target = "_blank"; a.rel = "noopener noreferrer";
+      const img = document.createElement("img");
+      img.className = "msgimg"; img.src = m.image; img.alt = "image"; img.loading = "lazy";
+      img.addEventListener("load", () => {
+        // keep the view pinned to the latest if we were already at the bottom
+        if (streamEl.scrollTop + streamEl.clientHeight >= streamEl.scrollHeight - 80) scrollBottom();
+      });
+      a.appendChild(img);
+      row.appendChild(a);
+    }
     streamColEl.appendChild(row);
     lastSender = m.username;
   }
@@ -778,6 +883,7 @@
         case "roster":       renderRoster(m); break;
         case "history":      renderHistory(m.room, m.messages); break;
         case "msg":          onMsg(m); break;
+        case "typing":       onTyping(m); break;
         case "room_opened":  onRoomOpened(m.room); break;
         case "profile_data": onProfileData(m.user); break;
         case "denied":       break;  // sent while not present; ignore quietly
@@ -803,6 +909,9 @@
     username = (m.me && m.me.username) || m.username || "";
     rooms = Array.isArray(m.rooms) ? m.rooms : [];
     dms   = Array.isArray(m.dms) ? m.dms : [];
+    // Seed unread badges from the server so counts survive a reload (the room
+    // we're about to open gets zeroed by joinRoom below).
+    unread = (m.unread && typeof m.unread === "object") ? m.unread : {};
     try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
 
     meNameEl.textContent = "@" + username;
@@ -810,6 +919,7 @@
 
     if (!currentRoom && rooms[0]) currentRoom = roomKey(rooms[0]);
     renderRooms(); renderDms(); markRoomHead();
+    updateTitle();  // reflect any seeded unread in the tab title/favicon
 
     applyPresence(m.present);
   }
@@ -896,7 +1006,7 @@
     send({ type: "profile", username: handle });
     // render a loading shell so the overlay opens immediately
     profileCard.innerHTML =
-      '<div class="profile-head"><button class="profile-close" id="pClose">×</button>' +
+      '<div class="profile-head"><div class="profile-actions"><button class="profile-close" id="pClose">×</button></div>' +
       '<div class="profile-handle">@' + esc(handle) + '</div>' +
       '<div class="profile-since">loading…</div></div>';
     body.classList.add("profile-open");
@@ -914,9 +1024,14 @@
     const btStr = fmtBuildTime(u.buildSeconds);
     const sinceStr = u.since ? new Date(u.since).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
 
+    var MSG_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+
     let html =
       '<div class="profile-head">' +
-        '<button class="profile-close" id="pClose">×</button>' +
+        '<div class="profile-actions">' +
+          (isYou ? '' : '<button class="profile-message" id="msgBtn" title="message @' + esc(u.username) + '">' + MSG_ICON + 'message</button>') +
+          '<button class="profile-close" id="pClose">×</button>' +
+        '</div>' +
         '<div class="profile-handle' + (isYou ? ' you' : '') + '">@' + esc(u.username) + '</div>' +
         '<div class="profile-since">building here since ' + esc(sinceStr) + '</div>' +
         '<div id="taglineView" class="profile-tagline' + (u.tagline ? '' : ' placeholder') + '">' +
@@ -925,7 +1040,7 @@
         (isYou
           ? '<span class="edit-link" id="editTagline">edit tagline</span>' +
             '<span class="edit-link rotate-link" id="rotateToken">rotate token</span>'
-          : '<button class="profile-message" id="msgBtn">message</button>') +
+          : '') +
       '</div>' +
       '<div class="stats">' +
         '<div class="stat"><div class="v accent">' + esc(String(streakCount(u.streak))) + '</div><div class="l">streak</div></div>' +
@@ -1143,18 +1258,90 @@
   tokenInput.addEventListener("input", clearSigninError);
 
   // ---- Composer (present only) --------------------------------------------
-  function sendCurrent() {
-    if (!present || !currentRoom) return;  // gated on presence
-    const b = (sayEl.value || "").trim();
-    if (!b) return;
-    send({ type: "say", room: currentRoom, body: b.slice(0, 1000) });
+  let sending = false;  // re-entrancy guard while a pending image uploads
+  async function sendCurrent() {
+    if (!present || !currentRoom || sending) return;  // gated on presence
+    const b = (sayEl.value || "").trim().slice(0, 1000);
+    if (!b && !pendingFile) return;
+
+    // No attachment: send text immediately, as before.
+    if (!pendingFile) {
+      send({ type: "say", room: currentRoom, body: b });
+      sayEl.value = "";
+      stopTyping();
+      return;
+    }
+
+    // With an attachment: upload first, then send text + image together. The file
+    // is only uploaded at SEND time, so a never-sent paste never orphans a file.
+    sending = true;
+    const btn = document.getElementById("attachBtn");
+    if (btn) btn.classList.add("busy");
+    let url = null;
+    try {
+      const r = await fetch("/upload", {
+        method: "POST",
+        headers: { "x-bc-token": token, "Content-Type": pendingFile.type },
+        body: pendingFile,
+      });
+      if (r.ok) { const d = await r.json(); url = d && d.url; }
+    } catch (_) {}
+    sending = false;
+    if (btn) btn.classList.remove("busy");
+    if (!url) { showTransient("upload failed — try again"); return; }  // keep text + attachment
+
+    send({ type: "say", room: currentRoom, body: b, image: url });
     sayEl.value = "";
+    clearPending();
+    stopTyping();
   }
   sayEl.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
     sendCurrent();
   });
+
+  // ---- Typing indicators --------------------------------------------------
+  // Outbound: announce typing once per burst, auto-stop after a short idle (or on
+  // send / room switch / tab hide). Inbound: show "<name> is typing…" for one,
+  // "N builders typing…" for more — for the current room only.
+  let typingSent = false;       // have we told the server we're typing?
+  let typingRoom = null;        // the room we announced typing in
+  let typingIdle = null;        // idle timer that auto-stops us
+  const TYPING_IDLE_MS = 4000;
+
+  function startTyping() {
+    if (!present || !currentRoom) return;
+    if (typingSent && typingRoom !== currentRoom) stopTyping();  // switched rooms mid-type
+    if (!typingSent) {
+      if (send({ type: "typing", room: currentRoom, state: true })) {
+        typingSent = true; typingRoom = currentRoom;
+      }
+    }
+    if (typingIdle) clearTimeout(typingIdle);
+    typingIdle = setTimeout(stopTyping, TYPING_IDLE_MS);
+  }
+  function stopTyping() {
+    if (typingIdle) { clearTimeout(typingIdle); typingIdle = null; }
+    if (typingSent && typingRoom) send({ type: "typing", room: typingRoom, state: false });
+    typingSent = false; typingRoom = null;
+  }
+  sayEl.addEventListener("input", () => { if (sayEl.value) startTyping(); else stopTyping(); });
+
+  function onTyping(m) {
+    if (!m || m.room !== currentRoom) return;
+    const others = (m.users || []).filter((u) => u && u !== username);
+    renderTyping(others);
+  }
+  function renderTyping(names) {
+    if (!typingEl) return;
+    if (!names.length) { typingEl.textContent = ""; typingEl.classList.remove("on"); return; }
+    typingEl.textContent = names.length === 1
+      ? names[0] + " is typing…"
+      : names.length + " builders typing…";
+    typingEl.classList.add("on");
+  }
+  function clearTypingIndicator() { renderTyping([]); }
   // keep composer placeholder in sync with the room
   const _markRoomHead = markRoomHead;
   markRoomHead = function () {
@@ -1163,10 +1350,163 @@
     if (r) {
       const label = (r.type === "dm" || r.type === "group")
         ? "message " + roomTitleEl.textContent + "…"
-        : "message #" + (r.name || r.slug) + "…";
+        : "message #" + channelName(r) + "…";
       sayEl.placeholder = label;
     }
   };
+
+  // ---- Image attachments (present only) -----------------------------------
+  // Paste / drop / pick ATTACHES an image to the pending message — it does NOT
+  // send. A preview chip shows above the input; the file is uploaded only when
+  // the message is actually sent (see sendCurrent), so it rides alongside text
+  // and a discarded paste never orphans a file on the server.
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  let pendingFile = null;     // the File staged to send with the next message
+  let pendingUrl = null;      // object URL for the preview (revoked on clear)
+
+  function setPendingImage(file) {
+    if (!present) return;
+    if (!file || !/^image\/(png|jpe?g|gif|webp)$/.test(file.type)) return;
+    if (file.size > MAX_IMAGE_BYTES) { showTransient("image too large (max 5MB)"); return; }
+    if (pendingUrl) { try { URL.revokeObjectURL(pendingUrl); } catch (_) {} }
+    pendingFile = file;
+    pendingUrl = URL.createObjectURL(file);
+    renderAttachPreview();
+    try { sayEl.focus(); } catch (_) {}
+  }
+  function clearPending() {
+    if (pendingUrl) { try { URL.revokeObjectURL(pendingUrl); } catch (_) {} }
+    pendingFile = null; pendingUrl = null;
+    renderAttachPreview();
+  }
+  function renderAttachPreview() {
+    const wrap = document.getElementById("attachPreview");
+    if (!wrap) return;
+    if (!pendingFile) { wrap.hidden = true; wrap.innerHTML = ""; return; }
+    wrap.hidden = false;
+    wrap.innerHTML = "";
+    const thumb = document.createElement("div");
+    thumb.className = "thumb";
+    const img = document.createElement("img");
+    img.src = pendingUrl; img.alt = "attachment";
+    const rm = document.createElement("button");
+    rm.type = "button"; rm.className = "rm"; rm.textContent = "×"; rm.title = "remove attachment";
+    rm.addEventListener("click", clearPending);
+    thumb.appendChild(img); thumb.appendChild(rm);
+    wrap.appendChild(thumb);
+  }
+  // a quiet, transient note in the composer placeholder (no new chrome needed)
+  function showTransient(text) {
+    const prev = sayEl.placeholder;
+    sayEl.placeholder = text;
+    setTimeout(() => { if (sayEl.placeholder === text) sayEl.placeholder = prev; }, 2400);
+  }
+
+  (() => {
+    const attachBtn = document.getElementById("attachBtn");
+    const fileInput = document.getElementById("fileInput");
+    if (attachBtn && fileInput) {
+      attachBtn.addEventListener("click", () => { if (present) fileInput.click(); });
+      fileInput.addEventListener("change", () => {
+        const f = fileInput.files && fileInput.files[0];
+        if (f) setPendingImage(f);
+        fileInput.value = "";  // let the same file be picked again
+      });
+    }
+    // paste a screenshot anywhere while present -> attach (don't send)
+    document.addEventListener("paste", (e) => {
+      if (!present) return;
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.type && it.type.indexOf("image/") === 0) {
+          const f = it.getAsFile();
+          if (f) { e.preventDefault(); setPendingImage(f); }
+          return;
+        }
+      }
+    });
+    // drag-and-drop onto the conversation -> attach (don't send)
+    ["dragenter", "dragover"].forEach((ev) =>
+      streamEl.addEventListener(ev, (e) => { if (present) { e.preventDefault(); body.classList.add("dragging"); } }));
+    ["dragleave", "drop"].forEach((ev) =>
+      streamEl.addEventListener(ev, (e) => { e.preventDefault(); body.classList.remove("dragging"); }));
+    streamEl.addEventListener("drop", (e) => {
+      if (!present) return;
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) setPendingImage(f);
+    });
+    // Escape clears a staged attachment (when the composer is focused)
+    sayEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && pendingFile) { e.preventDefault(); clearPending(); }
+    });
+  })();
+
+  // ---- Theming: light/dark + accent (persisted locally) -------------------
+  // --accent (the user's pick) is set inline on <html> and saved; --live is the
+  // token the whole UI derives from it (bright in dark, darkened in light). The
+  // pre-paint script in <head> applies both before first paint to avoid a flash.
+  const THEME_KEY  = "backchannel-theme";
+  const ACCENT_KEY = "backchannel-accent";
+  const DEFAULT_ACCENT = "#5fd99a";
+  const ACCENTS = [
+    { name: "green",    hex: "#5fd99a" },
+    { name: "terminal", hex: "#ffb000" },
+    { name: "blue",     hex: "#5cc8ff" },
+    { name: "purple",   hex: "#b693fb" },
+    { name: "pink",     hex: "#ff7eb6" },
+    { name: "red",      hex: "#ff6b6b" },
+    { name: "yellow",   hex: "#e8d44d" },
+  ];
+  const SUN_ICON  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  const MOON_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+
+  function currentAccent() {
+    try { const a = localStorage.getItem(ACCENT_KEY); if (a && /^#[0-9a-f]{6}$/i.test(a)) return a.toLowerCase(); } catch (_) {}
+    return DEFAULT_ACCENT;
+  }
+  function isLight() { return document.documentElement.classList.contains("theme-light"); }
+
+  function renderThemeToggle() {
+    const btn = document.getElementById("themeToggle");
+    if (!btn) return;
+    const light = isLight();
+    btn.innerHTML = light ? MOON_ICON : SUN_ICON;   // icon shows what you'll switch TO
+    btn.title = light ? "switch to dark" : "switch to light";
+  }
+  function renderSwatches() {
+    const wrap = document.getElementById("swatches");
+    if (!wrap) return;
+    const cur = currentAccent();
+    wrap.innerHTML = "";
+    ACCENTS.forEach((a) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "swatch" + (a.hex.toLowerCase() === cur ? " sel" : "");
+      b.style.setProperty("--sw", a.hex);
+      b.title = a.name;
+      b.addEventListener("click", () => applyAccent(a.hex));
+      wrap.appendChild(b);
+    });
+  }
+  function applyAccent(hex) {
+    document.documentElement.style.setProperty("--accent", hex);
+    try { localStorage.setItem(ACCENT_KEY, hex); } catch (_) {}
+    renderSwatches();
+    updateTitle();   // refresh the favicon's accent-colored unread dot
+  }
+  function setTheme(light) {
+    document.documentElement.classList.toggle("theme-light", !!light);
+    try { localStorage.setItem(THEME_KEY, light ? "light" : "dark"); } catch (_) {}
+    renderThemeToggle();
+  }
+
+  (() => {
+    const btn = document.getElementById("themeToggle");
+    if (btn) btn.addEventListener("click", () => setTheme(!isLight()));
+    renderThemeToggle();
+    renderSwatches();
+  })();
 
   // reconnect on tab focus if the socket died; also clear "hidden" unread since
   // you're now looking at the current room.
@@ -1175,6 +1515,8 @@
       hiddenUnread = 0;
       updateTitle();
       if (token && !ws && !manualClose) { reconnectDelay = 500; connect(); }
+    } else {
+      stopTyping();  // don't leave a stale "typing…" when we tab away
     }
   });
 

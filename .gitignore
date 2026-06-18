@@ -2,3 +2,6 @@ node_modules
 *.db
 .env
 .DS_Store
+
+# local preview helper (Claude preview MCP) — machine-specific paths
+.claude/launch.json
