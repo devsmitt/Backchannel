@@ -31,6 +31,9 @@ import {
   sha256,
   CAPS,
   createUser,
+  claimWithInvite,
+  invitesForUser,
+  normInvite,
   userByTokenHash,
   userByName,
   userById,
@@ -579,7 +582,10 @@ const server = http.createServer(async (req, res) => {
   // --- Health ------------------------------------------------------------
   if (method === 'GET' && urlPath === '/healthz') { sendText(res, 200, 'ok'); return; }
 
-  // --- Claim a username --------------------------------------------------
+  // --- Claim a username (INVITE-ONLY) ------------------------------------
+  // Requires a valid, unused invite code. On success the code is burned and the
+  // new user is granted their own invite codes (returned so the installer can
+  // show them). 403 {error:'invite'} when the code is missing/invalid/used.
   if (method === 'POST' && urlPath === '/claim') {
     if (!limitClaim.allow(clientIp(req))) { sendJson(res, 429, { error: 'rate limited' }); return; }
     const parsed = await readJsonBody(req);
@@ -588,15 +594,19 @@ const server = http.createServer(async (req, res) => {
     const username = normalizeUsername(body && body.username);
     const token = body && typeof body.token === 'string' ? body.token : '';
     const recovery = body && typeof body.recovery === 'string' ? body.recovery : '';
+    const code = normInvite(body && body.code);
 
     if (!username || !token || !recovery) { sendJson(res, 400, { error: 'bad request' }); return; }
-    if (userByName(username)) { sendJson(res, 409, { error: 'taken' }); return; }
-    try {
-      createUser(username, sha256(token), sha256(recovery));
-      sendJson(res, 200, { ok: true, username });
-    } catch {
-      // UNIQUE violation race (username or token_hash) -> treat as taken.
+    if (!code) { sendJson(res, 403, { error: 'invite', reason: 'missing' }); return; }
+
+    const result = claimWithInvite(username, sha256(token), sha256(recovery), code);
+    if (result.ok) {
+      sendJson(res, 200, { ok: true, username: result.username, invites: result.invites });
+    } else if (result.error === 'taken') {
       sendJson(res, 409, { error: 'taken' });
+    } else {
+      // invite_invalid | invite_used
+      sendJson(res, 403, { error: 'invite', reason: result.error });
     }
     return;
   }
@@ -942,6 +952,12 @@ function meBlock(user) {
   };
 }
 
+// Attach a user's invite codes to their OWN profile payload (never to others' —
+// invites are private to the holder).
+function withInvites(data, userId) {
+  return data ? { ...data, invites: invitesForUser(userId) } : data;
+}
+
 // Send the last-50 history of a room to one socket (oldest first).
 function sendHistory(ws, room) {
   const rows = recentMessages(room.id, HISTORY_LIMIT);
@@ -1167,7 +1183,7 @@ wss.on('connection', (ws) => {
       // Echo the updated profile so the client can re-render, and refresh roster
       // (taglines show in the roster).
       const fresh = profileByName(ws.username);
-      if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: fresh })); } catch {} }
+      if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: withInvites(fresh, ws.userId) })); } catch {} }
       broadcastRoster();
       return;
     }
@@ -1197,8 +1213,9 @@ wss.on('connection', (ws) => {
     if (msg.type === 'profile') {
       if (!ws.userId) return;
       const uname = typeof msg.username === 'string' ? msg.username.trim().toLowerCase() : '';
-      const data = uname ? profileByName(uname) : null;
+      let data = uname ? profileByName(uname) : null;
       if (!data) { wsError(ws, 'no such user'); return; }
+      if (uname === ws.username) data = withInvites(data, ws.userId);  // own profile -> include invites
       try { ws.send(JSON.stringify({ type: 'profile_data', user: data })); } catch { /* harmless */ }
       return;
     }
@@ -1209,7 +1226,7 @@ wss.on('connection', (ws) => {
       const result = addProject(ws.userId, msg.name, msg.url, msg.blurb);
       if (!result.ok) { wsError(ws, result.error); return; }
       const fresh = profileByName(ws.username);
-      if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: fresh })); } catch {} }
+      if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: withInvites(fresh, ws.userId) })); } catch {} }
       return;
     }
 
@@ -1218,7 +1235,7 @@ wss.on('connection', (ws) => {
       if (!ws.userId) return;
       removeProject(ws.userId, msg.id);
       const fresh = profileByName(ws.username);
-      if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: fresh })); } catch {} }
+      if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: withInvites(fresh, ws.userId) })); } catch {} }
       return;
     }
 

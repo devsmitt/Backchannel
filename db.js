@@ -36,6 +36,12 @@ try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (e) { /* exists / w
 // prune helper is self-contained). Default 6h.
 const RETENTION_MS = Number(process.env.RETENTION_MS) || 6 * 60 * 60 * 1000;
 
+// How many invite codes each user gets (new signups + the one-time seed of
+// existing users). Slow, organic growth: invite-only, a few per person.
+const INVITE_GRANT = Number(process.env.INVITE_GRANT) || 3;
+// Crockford base32 (no I/L/O/U) — unambiguous to read aloud and type.
+const INVITE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
 const db = new Database(DB_PATH);
 // WAL gives us better concurrent read behavior under the live socket load.
 db.pragma('journal_mode = WAL');
@@ -106,8 +112,20 @@ db.exec(`
     created_at INTEGER
   );
 
+  -- Invite codes: signup is invite-only. Each code is single-use; redeeming one
+  -- mints a fresh batch for the new user to share. owner_id is who holds it to
+  -- give out (NULL for genesis codes); used_by is who redeemed it (NULL = open).
+  CREATE TABLE IF NOT EXISTS invites (
+    code       TEXT PRIMARY KEY,
+    owner_id   INTEGER,
+    used_by    INTEGER,
+    created_at INTEGER,
+    used_at    INTEGER
+  );
+
   CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id, id);
   CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id);
+  CREATE INDEX IF NOT EXISTS idx_invites_owner ON invites(owner_id);
 `);
 
 // ---------------------------------------------------------------------------
@@ -316,6 +334,103 @@ export function createUser(username, tokenHash, recoveryHash) {
   const info = stmtInsertUser.run(username, tokenHash, recoveryHash, Date.now());
   return { id: info.lastInsertRowid, username };
 }
+
+// ---------------------------------------------------------------------------
+// Invites — signup is invite-only.
+// ---------------------------------------------------------------------------
+
+/** Normalize a typed code: uppercase, strip anything outside the alphabet. */
+export function normInvite(raw) {
+  return String(raw == null ? '' : raw).toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
+function genInviteCode(len = 8) {
+  const bytes = crypto.randomBytes(len);
+  let s = '';
+  for (let i = 0; i < len; i++) s += INVITE_ALPHABET[bytes[i] % INVITE_ALPHABET.length];
+  return s;
+}
+
+const stmtInsertInvite = db.prepare(
+  'INSERT INTO invites (code, owner_id, used_by, created_at, used_at) VALUES (?, ?, NULL, ?, NULL)'
+);
+const stmtInviteByCode = db.prepare('SELECT code, owner_id, used_by FROM invites WHERE code = ?');
+const stmtInvitesForOwner = db.prepare(
+  `SELECT i.code AS code, i.used_by AS used_by, u.username AS used_by_name
+     FROM invites i LEFT JOIN users u ON u.id = i.used_by
+    WHERE i.owner_id = ? ORDER BY i.created_at ASC, i.code ASC`
+);
+
+// Mint `n` fresh codes owned by ownerId (retrying on the astronomically unlikely
+// collision). Returns the code strings.
+function mintInvitesInner(ownerId, n) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let code = genInviteCode();
+    let tries = 0;
+    while (stmtInviteByCode.get(code) && tries++ < 5) code = genInviteCode();
+    stmtInsertInvite.run(code, ownerId, Date.now());
+    out.push(code);
+  }
+  return out;
+}
+
+/** A user's invite codes, each with whether/who it's been used by. */
+export function invitesForUser(ownerId) {
+  return stmtInvitesForOwner.all(ownerId).map((r) => ({
+    code: r.code,
+    used: !!r.used_by,
+    usedBy: r.used_by_name || null,
+  }));
+}
+
+/**
+ * Atomically claim a username against an invite code. Validates the code is real
+ * and unused, creates the user, burns the code, and mints INVITE_GRANT fresh
+ * codes for the new user — all in one transaction so a code can't be double-spent.
+ * Returns { ok:true, id, username, invites:[...] } or { ok:false, error }.
+ *   error: 'invite_invalid' | 'invite_used' | 'taken'
+ */
+export function claimWithInvite(username, tokenHash, recoveryHash, code) {
+  const tx = db.transaction(() => {
+    const inv = stmtInviteByCode.get(code);
+    if (!inv) return { ok: false, error: 'invite_invalid' };
+    if (inv.used_by) return { ok: false, error: 'invite_used' };
+
+    let info;
+    try {
+      info = stmtInsertUser.run(username, tokenHash, recoveryHash, Date.now());
+    } catch {
+      return { ok: false, error: 'taken' };   // username or token_hash UNIQUE
+    }
+    const userId = info.lastInsertRowid;
+    db.prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE code = ?').run(userId, Date.now(), code);
+    const invites = mintInvitesInner(userId, INVITE_GRANT);
+    return { ok: true, id: userId, username, invites };
+  });
+  return tx();
+}
+
+// One-time invite bootstrap (runs after the invite statements above exist).
+// - GENESIS_INVITES (optional, space/comma separated): open codes for a fresh
+//   deploy so the very first account can be claimed.
+// - Seed any user who owns zero invites — i.e. existing users on the first boot
+//   after this system lands. A no-op once everyone holds codes.
+(() => {
+  const genesis = String(process.env.GENESIS_INVITES || '')
+    .split(/[\s,]+/).map(normInvite).filter(Boolean);
+  for (const code of genesis) {
+    if (!stmtInviteByCode.get(code)) {
+      try { stmtInsertInvite.run(code, null, Date.now()); } catch { /* ignore */ }
+    }
+  }
+  const needing = db.prepare(
+    'SELECT id FROM users WHERE id NOT IN (SELECT owner_id FROM invites WHERE owner_id IS NOT NULL)'
+  ).all();
+  if (needing.length) {
+    db.transaction(() => { for (const u of needing) mintInvitesInner(u.id, INVITE_GRANT); })();
+  }
+})();
 
 /** Resolve a user from a token hash (the per-socket / hook auth lookup). */
 export function userByTokenHash(tokenHash) {
