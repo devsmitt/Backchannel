@@ -124,6 +124,12 @@
   .row .rname { flex: 1; min-width: 0; font-size: 14px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row.sel .rname { color: var(--text); }
   .row .badge { font-family: var(--mono); font-size: 11px; color: var(--bg); background: var(--live); border-radius: 9px; padding: 0 6px; min-width: 18px; text-align: center; }
+  /* DM rows get a hover-revealed hide/restore action in the right corner */
+  .row.dmrow { position: relative; }
+  .row.dmrow .dmact { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--faint); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; opacity: 0; transition: opacity 120ms ease; }
+  .row.dmrow:hover .dmact { opacity: 1; }
+  .row.dmrow:hover .badge { opacity: 0; }
+  .row.dmrow .dmact:hover { color: var(--text); }
   .empty-note { padding: 2px 22px 0; font-family: var(--mono); font-size: 11px; color: var(--ghost); }
 
   /* presence roster */
@@ -574,7 +580,9 @@
   let present       = false;     // is this user currently active (building now)?
   let username      = "";        // resolved server-side from the token
   let rooms         = [];        // channels [{id,slug,name,type}]
-  let dms           = [];        // [{id,name,type,members}]
+  let dms           = [];        // visible DMs/groups [{id,name,type,members}]
+  let archivedDms   = [];        // hidden ("archived") DMs/groups
+  let showArchived  = false;     // is the hidden-chats section expanded?
   let currentRoom   = null;      // slug|id string of the active room
   let signedIn      = false;     // have we gotten a {welcome}?
   let lastSender    = null;      // for message grouping
@@ -588,7 +596,9 @@
   // ---- Unread → tab title + favicon ----------------------------------------
   function totalUnread() {
     let n = hiddenUnread;
-    for (const k in unread) n += unread[k] || 0;
+    // archived (hidden) chats accrue messages but must not nag the title/favicon
+    const hidden = new Set(archivedDms.map((d) => roomKey(d)));
+    for (const k in unread) { if (!hidden.has(k)) n += unread[k] || 0; }
     return n;
   }
   function faviconSvg(dotColor) {
@@ -713,7 +723,8 @@
   }
   function findRoom(key) {
     return rooms.find((r) => roomKey(r) === key) ||
-           dms.find((r) => String(r.id) === key || r.slug === key) || null;
+           dms.find((r) => String(r.id) === key || r.slug === key) ||
+           archivedDms.find((r) => String(r.id) === key || r.slug === key) || null;
   }
   function fmtTime(ts) {
     if (!ts) return "";
@@ -757,35 +768,56 @@
     });
   }
 
+  // Label a DM/group by the OTHER members (never your own handle).
+  function dmLabel(r) {
+    if (Array.isArray(r.members)) {
+      const others = r.members.filter((u) => u !== username);
+      if (others.length) return others.join(", ");
+    }
+    return r.name || "direct";
+  }
+  function dmRowEl(r, isArchived) {
+    const key = roomKey(r);
+    const div = document.createElement("div");
+    div.className = "row dmrow" + (key === currentRoom ? " sel" : "");
+    const others = (r.members || []).filter((u) => u !== username);
+    const dotCls = others.some((u) => isActive(u)) ? "live"
+                 : others.some((u) => isBuilding(u)) ? "building" : "offline";
+    div.innerHTML =
+      '<span class="dot ' + dotCls + '"></span>' +
+      '<span class="rname">' + esc(dmLabel(r)) + '</span>';
+    const un = unread[key] || 0;
+    if (un > 0 && key !== currentRoom) {
+      const b = document.createElement("span");
+      b.className = "badge"; b.textContent = un > 99 ? "99+" : String(un);
+      div.appendChild(b);
+    }
+    // hide / restore action (hover-revealed)
+    const act = document.createElement("button");
+    act.className = "dmact"; act.type = "button";
+    act.title = isArchived ? "restore chat" : "hide chat";
+    act.textContent = isArchived ? "↩" : "×";
+    act.addEventListener("click", (e) => { e.stopPropagation(); isArchived ? unarchiveDm(key) : archiveDm(key); });
+    div.appendChild(act);
+    div.addEventListener("click", () => { if (key !== currentRoom) joinRoom(key); });
+    return div;
+  }
+
   function renderDms() {
     dmListEl.innerHTML = "";
-    // DIRECT section only exists once DMs exist; hidden entirely otherwise
-    if (dmSectionEl) dmSectionEl.style.display = dms.length ? "" : "none";
-    dms.forEach((r) => {
-      const key = roomKey(r);   // slug — must match what the server puts in msg.room
-      const div = document.createElement("div");
-      div.className = "row" + (key === currentRoom ? " sel" : "");
-      // dm/group label: other members' handles
-      let label = r.name;
-      if (!label && Array.isArray(r.members)) {
-        label = r.members.filter((u) => u !== username).join(", ") || r.members.join(", ");
-      }
-      // presence dot from roster (active if any other member active)
-      const others = (r.members || []).filter((u) => u !== username);
-      const dotCls = others.some((u) => isActive(u)) ? "live"
-                   : others.some((u) => isBuilding(u)) ? "building" : "offline";
-      div.innerHTML =
-        '<span class="dot ' + dotCls + '"></span>' +
-        '<span class="rname">' + esc(label || "direct") + '</span>';
-      const un = unread[key] || 0;
-      if (un > 0 && key !== currentRoom) {
-        const b = document.createElement("span");
-        b.className = "badge"; b.textContent = un > 99 ? "99+" : String(un);
-        div.appendChild(b);
-      }
-      div.addEventListener("click", () => { if (key !== currentRoom) joinRoom(key); });
-      dmListEl.appendChild(div);
-    });
+    // DIRECT section appears once there are any DMs (visible or hidden)
+    if (dmSectionEl) dmSectionEl.style.display = (dms.length || archivedDms.length) ? "" : "none";
+    dms.forEach((r) => dmListEl.appendChild(dmRowEl(r, false)));
+
+    // hidden chats: a collapsible section so archived DMs stay out of the way
+    if (archivedDms.length) {
+      const link = document.createElement("div");
+      link.className = "morelink";
+      link.textContent = (showArchived ? "▾ " : "▸ ") + archivedDms.length + " hidden";
+      link.addEventListener("click", () => { showArchived = !showArchived; renderDms(); });
+      dmListEl.appendChild(link);
+      if (showArchived) archivedDms.forEach((r) => dmListEl.appendChild(dmRowEl(r, true)));
+    }
     // keep the quick-switch dropdown in sync (unread/presence) while it's open
     if (roomMenuEl && !roomMenuEl.hidden) renderRoomMenu();
   }
@@ -908,11 +940,7 @@
     const r = findRoom(currentRoom);
     if (!r) return;
     if (r.type === "dm" || r.type === "group") {
-      let label = r.name;
-      if (!label && Array.isArray(r.members)) {
-        label = r.members.filter((u) => u !== username).join(", ");
-      }
-      roomTitleLabelEl.textContent = "@" + (label || "direct");
+      roomTitleLabelEl.textContent = "@" + dmLabel(r);
       roomTopicEl.textContent = r.type === "group" ? "group" : "direct message";
     } else {
       roomTitleLabelEl.textContent = "#" + channelName(r);
@@ -936,11 +964,9 @@
     const div = document.createElement("div");
     div.className = "rm-item" + (key === currentRoom ? " sel" : "");
     if (isDm) {
-      let label = r.name;
-      if (!label && Array.isArray(r.members)) label = r.members.filter((u) => u !== username).join(", ") || r.members.join(", ");
       const others = (r.members || []).filter((u) => u !== username);
       const dotCls = others.some(isActive) ? "live" : others.some(isBuilding) ? "building" : "offline";
-      div.innerHTML = '<span class="dot ' + dotCls + '"></span><span class="rm-name">' + esc(label || "direct") + '</span>';
+      div.innerHTML = '<span class="dot ' + dotCls + '"></span><span class="rm-name">' + esc(dmLabel(r)) + '</span>';
     } else {
       div.innerHTML = '<span class="rm-hash">#</span><span class="rm-name">' + esc(channelName(r)) + '</span>';
     }
@@ -1071,6 +1097,7 @@
         case "msg":          onMsg(m); break;
         case "typing":       onTyping(m); break;
         case "room_opened":  onRoomOpened(m.room); break;
+        case "dms":          onDms(m); break;
         case "profile_data": onProfileData(m.user); break;
         case "denied":       break;  // sent while not present; ignore quietly
         case "error":        onAuthError(m.message); break;
@@ -1095,6 +1122,7 @@
     username = (m.me && m.me.username) || m.username || "";
     rooms = Array.isArray(m.rooms) ? m.rooms : [];
     dms   = Array.isArray(m.dms) ? m.dms : [];
+    archivedDms = Array.isArray(m.archived) ? m.archived : [];
     // Seed unread badges from the server so counts survive a reload (the room
     // we're about to open gets zeroed by joinRoom below).
     unread = (m.unread && typeof m.unread === "object") ? m.unread : {};
@@ -1140,12 +1168,29 @@
   function onRoomOpened(room) {
     if (!room) return;
     const key = roomKey(room);   // slug — consistent with channels + the server's msg.room
+    // opening it makes it active — pull it out of archived if it was there
+    archivedDms = archivedDms.filter((d) => roomKey(d) !== key);
     if (!dms.some((d) => roomKey(d) === key)) {
       dms.push(room);
       renderDms();
     }
     joinRoom(key);
   }
+
+  // Server pushed fresh dm lists after an archive/unarchive.
+  function onDms(m) {
+    dms = Array.isArray(m.dms) ? m.dms : [];
+    archivedDms = Array.isArray(m.archived) ? m.archived : [];
+    // if the room we're viewing just got archived, fall back to a channel
+    if (currentRoom && !findRoom(currentRoom)) {
+      const fallback = rooms[0] && roomKey(rooms[0]);
+      if (fallback) joinRoom(fallback);
+    }
+    renderDms();
+    updateTitle();
+  }
+  function archiveDm(key) { send({ type: "archive_dm", room: key }); }
+  function unarchiveDm(key) { send({ type: "unarchive_dm", room: key }); }
 
   function onAuthError(message) {
     manualClose = true;
