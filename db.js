@@ -16,6 +16,7 @@
 
 import Database from 'better-sqlite3';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +24,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // DB_PATH from env (Railway volume mount); sensible local default otherwise.
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'backchannel.db');
+
+// Uploaded images live on the SAME volume as the DB (so they persist across
+// deploys), in an `uploads/` dir beside it. Overridable for tests. Created on
+// boot so the upload endpoint can write immediately.
+export const UPLOAD_DIR =
+  process.env.UPLOAD_DIR || path.join(path.dirname(DB_PATH), 'uploads');
+try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (e) { /* exists / will surface on write */ }
 
 // Retention window for message pruning (mirrors server env; read here too so the
 // prune helper is self-contained). Default 6h.
@@ -74,7 +82,18 @@ db.exec(`
     user_id    INTEGER NOT NULL,
     username   TEXT NOT NULL,
     body       TEXT NOT NULL,
+    image      TEXT,
     created_at INTEGER
+  );
+
+  -- Per-user read cursor: the highest message id this user has seen in a room.
+  -- Unread = messages in the room (from others) with id > last_read_id. This is
+  -- what lets unread badges survive a reload — especially for permanent DMs.
+  CREATE TABLE IF NOT EXISTS room_reads (
+    user_id      INTEGER NOT NULL,
+    room_id      INTEGER NOT NULL,
+    last_read_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, room_id)
   );
 
   CREATE TABLE IF NOT EXISTS projects (
@@ -114,6 +133,9 @@ function migrate() {
   addColumnIfMissing('users', 'build_seconds', 'build_seconds INTEGER DEFAULT 0');
   addColumnIfMissing('users', 'streak_days', 'streak_days INTEGER DEFAULT 0');
   addColumnIfMissing('users', 'last_build_day', "last_build_day TEXT DEFAULT ''");
+
+  // messages: optional image attachment (a /uploads/<file> path).
+  addColumnIfMissing('messages', 'image', 'image TEXT');
 
   // rooms: type + created_at. (position existed in v1.)
   addColumnIfMissing('rooms', 'type', "type TEXT DEFAULT 'channel'");
@@ -197,10 +219,26 @@ const stmtUpdateToken = db.prepare('UPDATE users SET token_hash = ? WHERE id = ?
 const stmtSetTagline = db.prepare('UPDATE users SET tagline = ? WHERE id = ?');
 
 const stmtInsertMessage = db.prepare(
-  'INSERT INTO messages (room_id, user_id, username, body, created_at) VALUES (?, ?, ?, ?, ?)'
+  'INSERT INTO messages (room_id, user_id, username, body, image, created_at) VALUES (?, ?, ?, ?, ?, ?)'
 );
 const stmtRecentMessages = db.prepare(
-  'SELECT id, username, body, created_at FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT ?'
+  'SELECT id, username, body, image, created_at FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT ?'
+);
+const stmtMaxMsgId = db.prepare(
+  'SELECT COALESCE(MAX(id), 0) AS m FROM messages WHERE room_id = ?'
+);
+const stmtGetRead = db.prepare(
+  'SELECT last_read_id FROM room_reads WHERE user_id = ? AND room_id = ?'
+);
+const stmtUpsertRead = db.prepare(
+  `INSERT INTO room_reads (user_id, room_id, last_read_id) VALUES (?, ?, ?)
+     ON CONFLICT(user_id, room_id)
+     DO UPDATE SET last_read_id = MAX(last_read_id, excluded.last_read_id)`
+);
+// Count messages in a room newer than the user's read cursor, EXCLUDING their
+// own lines (your own message never counts as unread).
+const stmtCountUnread = db.prepare(
+  'SELECT COUNT(*) AS n FROM messages WHERE room_id = ? AND id > ? AND user_id != ?'
 );
 // Retention fades CHANNEL chatter only. DMs and groups are private conversations
 // with full staying power — they are NEVER pruned, so they're always there when
@@ -208,6 +246,14 @@ const stmtRecentMessages = db.prepare(
 const stmtPruneMessages = db.prepare(
   `DELETE FROM messages
      WHERE created_at < ?
+       AND room_id IN (SELECT id FROM rooms WHERE type = 'channel')`
+);
+// Image paths of the channel messages that the next prune will delete — so we
+// can unlink the backing files and not orphan them on the volume.
+const stmtPrunableImages = db.prepare(
+  `SELECT image FROM messages
+     WHERE created_at < ?
+       AND image IS NOT NULL
        AND room_id IN (SELECT id FROM rooms WHERE type = 'channel')`
 );
 
@@ -508,10 +554,13 @@ export function findOrCreatePrivateRoom(memberIds) {
 // Messages.
 // ---------------------------------------------------------------------------
 
-/** Persist a chat line. Returns { id, created_at } for broadcast. */
-export function insertMessage(roomId, userId, username, body) {
+/**
+ * Persist a chat line. `image` is an optional /uploads/<file> path for an image
+ * attachment (null for a plain text line). Returns { id, created_at }.
+ */
+export function insertMessage(roomId, userId, username, body, image = null) {
   const createdAt = Date.now();
-  const info = stmtInsertMessage.run(roomId, userId, username, body, createdAt);
+  const info = stmtInsertMessage.run(roomId, userId, username, body, image || null, createdAt);
   return { id: info.lastInsertRowid, created_at: createdAt };
 }
 
@@ -523,10 +572,56 @@ export function recentMessages(roomId, limit) {
   return stmtRecentMessages.all(roomId, limit).reverse();
 }
 
-/** Prune messages older than the retention window. Returns rows deleted. */
+/**
+ * Prune channel messages older than the retention window, AND unlink the image
+ * files those messages were carrying (so retention frees disk, not just rows).
+ * DMs/groups are never touched. Returns rows deleted.
+ */
 export function pruneOldMessages(retentionMs = RETENTION_MS, now = Date.now()) {
   const cutoff = now - retentionMs;
-  return stmtPruneMessages.run(cutoff).changes;
+  // Collect backing files first, then delete the rows, then unlink best-effort.
+  let images = [];
+  try { images = stmtPrunableImages.all(cutoff).map((r) => r.image).filter(Boolean); }
+  catch (e) { /* fall through — never let file cleanup block row pruning */ }
+  const changes = stmtPruneMessages.run(cutoff).changes;
+  for (const url of images) {
+    // url is '/uploads/<file>' — resolve to a basename inside UPLOAD_DIR only.
+    const file = path.basename(String(url));
+    if (!file || file === '.' || file === '..') continue;
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, file)); } catch (e) { /* already gone / shared */ }
+  }
+  return changes;
+}
+
+/** Highest message id currently in a room (0 if empty). */
+export function latestMessageId(roomId) {
+  return stmtMaxMsgId.get(roomId).m;
+}
+
+/**
+ * Advance a user's read cursor in a room. Monotonic — never moves backwards, so
+ * passing a stale id is a no-op. Called on join (caught up to latest) and as each
+ * message is delivered to a socket that's actively viewing that room.
+ */
+export function markRead(userId, roomId, lastReadId) {
+  stmtUpsertRead.run(userId, roomId, Number(lastReadId) || 0);
+}
+
+/**
+ * Unread counts for every room a user can see (all channels + their private
+ * rooms), keyed by room slug. Rooms with zero unread are omitted, so the map is
+ * small. Used to seed badges on welcome so they survive a reload.
+ */
+export function unreadCountsForUser(userId) {
+  const out = {};
+  const rooms = [...stmtListChannels.all(), ...stmtUserPrivateRooms.all(userId)];
+  for (const r of rooms) {
+    const row = stmtGetRead.get(userId, r.id);
+    const lastRead = row ? row.last_read_id : 0;
+    const n = stmtCountUnread.get(r.id, lastRead, userId).n;
+    if (n > 0) out[r.slug] = n;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

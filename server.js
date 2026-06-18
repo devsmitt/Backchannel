@@ -50,6 +50,10 @@ import {
   insertMessage,
   recentMessages,
   pruneOldMessages,
+  latestMessageId,
+  markRead,
+  unreadCountsForUser,
+  UPLOAD_DIR,
   listProjects,
   addProject,
   removeProject,
@@ -74,12 +78,23 @@ const SWEEP_MS = Number(process.env.SWEEP_MS) || 60 * 1000;                     
 // (multi-tool runs, minutes between tools) never trips it — only a genuinely
 // idle/stuck session does. Generous on purpose: never kick someone mid-build.
 const INACTIVITY_MS = Number(process.env.INACTIVITY_TIMEOUT) || 20 * 60 * 1000;
+// Grace after your LAST agent session says it's done (/exit) before you fade. A
+// short coast so normal between-turn gaps (reading output, typing the next
+// prompt) never flip you out — and so one session ending can't kick you while
+// another is still working (any /enter during the grace cancels it). This is the
+// fix for the multi-session flapping: /exit no longer hard-drops presence.
+const EXIT_GRACE_MS = Number(process.env.EXIT_GRACE) || 45 * 1000;
 // Separate, larger cap on how much active time ONE session can credit to
 // build_seconds (long sessions still count; a stuck one can't credit absurd time).
 const BUILD_CAP_MS = Number(process.env.BUILD_CAP) || 2 * 60 * 60 * 1000;
 
 const MAX_BODY_LEN = 1000;              // hard cap on a chat line.
 const HISTORY_LIMIT = 50;               // backlog returned on room entry.
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES) || 5 * 1024 * 1024; // 5MB image ceiling.
+// A stored image path is ALWAYS of the form /uploads/<file> where <file> is the
+// random name we minted. The client must never be able to point this at anything
+// else, so both the upload response and the 'say' validation use this shape.
+const UPLOAD_PATH_RE = /^\/uploads\/[A-Za-z0-9_-]+\.(png|jpg|jpeg|gif|webp)$/;
 const HEARTBEAT_MS = 30 * 1000;         // ws ping interval for dead-socket reaping.
 const USERNAME_RE = /^[a-z0-9_-]{2,24}$/;
 const RECOVER_MAX_TRIES = 5;            // recovery-phrase guesses allowed per window
@@ -141,8 +156,10 @@ const limitPairRedeem= makeLimiter({ capacity: 30,  windowMs: 60 * 1000 });     
 const limitPresence  = makeLimiter({ capacity: 120, windowMs: 60 * 1000 });        // /enter + /exit per token-hash combined: 120/min
 const limitRotate    = makeLimiter({ capacity: 5,   windowMs: 60 * 1000 });        // /rotate per token-hash: 5/min
 const limitSay       = makeLimiter({ capacity: 20,  windowMs: 10 * 1000 });        // WS 'say' per userId: 20 / 10s
+const limitUpload    = makeLimiter({ capacity: 12,  windowMs: 60 * 1000 });        // /upload per token-hash: 12/min
+const limitTyping    = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'typing' per userId: 40 / 10s
 
-const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitRotate, limitSay];
+const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitRotate, limitSay, limitUpload, limitTyping];
 
 // Extract the client IP. Behind Railway's proxy the real client is the FIRST
 // hop in X-Forwarded-For; fall back to the socket address when no proxy header.
@@ -201,10 +218,17 @@ function sweepPairings(now = Date.now()) {
   }
 }
 
+// Per-user presence state. The KEY idea: presence is "do I have any live agent
+// session?", tracked as a SET of session ids (each with its last-seen time) —
+// NOT a single shared boolean. One session ending removes only its own id; you
+// stay present while any other session is alive. `spanStart` marks the start of
+// the current present span (for build-time crediting); `timer` is the single
+// per-user deadline (full inactivity window while sessions live, short grace once
+// the last one exits).
 function presenceState(userId) {
   let s = presence.get(userId);
   if (!s) {
-    s = { present: false, enterAt: null, timer: null };
+    s = { sessions: new Map(), present: false, spanStart: null, timer: null };
     presence.set(userId, s);
   }
   return s;
@@ -286,60 +310,98 @@ function broadcastRoster() {
 
 // ---------------------------------------------------------------------------
 // Presence transitions, driven by /enter and /exit hook pings.
+//
+// The model in one sentence: you are PRESENT while at least one of your agent
+// sessions is alive — a session lives from its first /enter until it sends /exit
+// or goes silent past the inactivity window. Hooks that lack a session id (older
+// installs, or non-session integrations) all share the id 'legacy', which still
+// gets the grace-on-exit behavior, just without per-session granularity.
 // ---------------------------------------------------------------------------
 
-function enterUser(userId) {
+// Re-arm the single per-user deadline:
+//   - sessions alive  -> fade only after the most-recent one has been silent for
+//                        the full inactivity window (a crash/stall backstop).
+//   - no sessions left -> a short grace, so a between-turns lull or one session
+//                        ending never flips you out (any /enter cancels it).
+function rearmPresence(userId) {
+  const s = presence.get(userId);
+  if (!s) return;
+  if (s.timer) { clearTimeout(s.timer); s.timer = null; }
+  let delay;
+  if (s.sessions.size > 0) {
+    let latest = 0;
+    for (const t of s.sessions.values()) if (t > latest) latest = t;
+    delay = Math.max(1000, latest + INACTIVITY_MS - Date.now());
+  } else {
+    delay = EXIT_GRACE_MS;
+  }
+  s.timer = setTimeout(() => sweepPresence(userId), delay);
+}
+
+// Deadline fired: reap sessions silent past the inactivity window; if any remain
+// alive, stay present (re-arm); otherwise fade out for real.
+function sweepPresence(userId) {
+  const s = presence.get(userId);
+  if (!s) return;
+  const now = Date.now();
+  for (const [sid, t] of s.sessions) if (now - t >= INACTIVITY_MS) s.sessions.delete(sid);
+  if (s.sessions.size > 0) { rearmPresence(userId); return; }
+  fade(userId);
+}
+
+// A ping from one session (/enter). `event` distinguishes the trigger:
+//   'prompt' — the user fired a prompt (a real Claude turn) -> counts toward the
+//              "sessions" vanity metric + advances the streak.
+//   'enter'  — a heartbeat (PreToolUse) or answering a question -> presence only.
+//   absent   — older hooks that can't tell the two apart -> approximate by
+//              counting once per fresh present span.
+// Counting is DECOUPLED from presence: concurrent agents each tally their prompts,
+// and presence never flaps even as the count climbs.
+function enterUser(userId, sessionId, event) {
   const s = presenceState(userId);
   const now = Date.now();
   const wasPresent = s.present;
-  s.present = true;
-  if (!wasPresent) s.enterAt = now;       // session start — only on a real transition
+  s.sessions.set(sessionId || 'legacy', now);
 
-  // (Re)start the inactivity timer. Every /enter (incl. the PreToolUse heartbeat)
-  // resets it, so it only fires after INACTIVITY_MS of true silence — catching
-  // turns that ended without a Stop (interrupt / silent stall) without ever
-  // kicking someone whose agent is still working.
-  if (s.timer) clearTimeout(s.timer);
-  s.timer = setTimeout(() => forceExit(userId), INACTIVITY_MS);
-
-  if (!wasPresent) {
-    // A genuine NEW session: count it (sessions + streak), stamp last_active.
+  const countSession = event === 'prompt' || (!event && !wasPresent);
+  if (countSession) {
+    // recordEnter bumps total_builds, advances the streak, stamps last_active.
     try { recordEnter(userId, now); } catch (e) { console.error('[backchannel] recordEnter:', e); }
-    pushToUser(userId, { type: 'presence', present: true });
-    broadcastRoster();
   } else {
-    // Already present (heartbeat / question / repeated tool use): refresh
-    // activity only — do NOT inflate the session count. No re-broadcast needed.
+    // Heartbeat: refresh activity only.
     try { touchActive(userId, now); } catch (e) { console.error('[backchannel] touchActive:', e); }
   }
+
+  if (!wasPresent) {
+    s.present = true;
+    s.spanStart = now;
+    pushToUser(userId, { type: 'presence', present: true });
+    broadcastRoster();
+  }
+  rearmPresence(userId);
 }
 
-function exitUser(userId) {
+// One session reported it's done (/exit). Remove just that session; you only
+// begin fading (after the grace) once the LAST one is gone. This is what stops a
+// turn ending in one repo from kicking you while another repo is still building.
+function exitUser(userId, sessionId) {
   const s = presence.get(userId);
   if (!s) return;
-  const enterAt = s.enterAt;
+  s.sessions.delete(sessionId || 'legacy');
+  rearmPresence(userId);
+}
+
+// The only place presence actually drops. Credits the whole present span's active
+// time (capped) and broadcasts the fade.
+function fade(userId) {
+  const s = presence.get(userId);
+  if (!s || !s.present) return;
+  const spanStart = s.spanStart;
   s.present = false;
-  s.enterAt = null;
+  s.spanStart = null;
+  s.sessions.clear();
   if (s.timer) { clearTimeout(s.timer); s.timer = null; }
-
-  // Persist builder status: add active duration (capped) to build_seconds,
-  // stamp last_active=now (so the user shows as 'building' for the window).
-  try { recordExit(userId, enterAt, BUILD_CAP_MS); } catch (e) { console.error('[backchannel] recordExit:', e); }
-
-  pushToUser(userId, { type: 'presence', present: false });
-  broadcastRoster();
-}
-
-// The camping ceiling fired: force this user absent. Treated as a real exit so
-// build_seconds is credited and last_active stamped (they were genuinely active).
-function forceExit(userId) {
-  const s = presence.get(userId);
-  if (!s) return;
-  const enterAt = s.enterAt;
-  s.timer = null;
-  s.present = false;
-  s.enterAt = null;
-  try { recordExit(userId, enterAt, BUILD_CAP_MS); } catch (e) { console.error('[backchannel] forceExit:', e); }
+  try { recordExit(userId, spanStart, BUILD_CAP_MS); } catch (e) { console.error('[backchannel] recordExit:', e); }
   pushToUser(userId, { type: 'presence', present: false });
   broadcastRoster();
 }
@@ -372,7 +434,50 @@ const MIME = {
   '.ico': 'image/x-icon',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
 };
+
+// Sniff an image type from its leading bytes. We trust the BYTES, never the
+// client's Content-Type — so a renamed/forged header can't get a non-image (or a
+// script-bearing SVG) past us. Returns the file extension or null if unrecognized.
+function sniffImageExt(buf) {
+  if (!buf || buf.length < 12) return null;
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png';
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  // GIF: "GIF87a" / "GIF89a"
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'gif';
+  // WEBP: "RIFF"...."WEBP"
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'webp';
+  return null;
+}
+
+// Read a raw (binary) request body up to a cap. Resolves:
+//   { ok:true,  buffer }        on success
+//   { ok:false, tooBig:true }   when the cap is exceeded (-> 413)
+//   { ok:false }                on a transport error
+function readRawBody(req, maxBytes) {
+  return new Promise((resolve) => {
+    let size = 0;
+    const chunks = [];
+    let settled = false;
+    const finish = (v) => { if (!settled) { settled = true; resolve(v); } };
+    req.on('data', (chunk) => {
+      if (settled) return;
+      size += chunk.length;
+      if (size > maxBytes) { chunks.length = 0; req.on('data', () => {}); finish({ ok: false, tooBig: true }); return; }
+      chunks.push(chunk);
+    });
+    req.on('end', () => finish({ ok: true, buffer: Buffer.concat(chunks) }));
+    req.on('error', () => finish({ ok: false }));
+    req.on('aborted', () => finish({ ok: false }));
+  });
+}
 
 // Read a JSON POST body with a sane cap. Every endpoint here carries only tiny
 // JSON ({token}, {username,token,recovery}, {code}), so an 8KB ceiling is far
@@ -605,24 +710,28 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- Presence enter (UserPromptSubmit hook) ----------------------------
-  // {token} -> mark present, start camping timer, bump status, broadcast roster.
-  // Unknown token -> still 200 (no existence leak). Always 200, fast.
+  // --- Presence enter (UserPromptSubmit / PreToolUse / answer hook) ------
+  // {token, session?} -> mark that session alive, (re)arm the timer, bump status,
+  // broadcast roster. `session` is optional: present on session-aware installs,
+  // absent on older ones (which all share the 'legacy' id). Unknown token -> still
+  // 200 (no existence leak). Always 200, fast.
   if (method === 'POST' && urlPath === '/enter') {
     const parsed = await readJsonBody(req);
     if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
     const body = parsed.body;
     const token = body && typeof body.token === 'string' ? body.token.trim() : '';
+    const session = body && typeof body.session === 'string' ? body.session.slice(0, 80) : '';
     // Presence is fire-and-forget: 200 fast, no existence leak. Rate-limit per
     // token-hash (combined with /exit) so a hook misfire loop can't hammer us;
     // unknown/empty tokens never reach the limiter or the DB lookup.
     if (token) {
       const tokenHash = sha256(token);
       if (!limitPresence.allow(tokenHash)) { sendJson(res, 429, { error: 'rate limited' }); return; }
+      const event = body && typeof body.event === 'string' ? body.event : '';
       sendJson(res, 200, { ok: true });
       setImmediate(() => {
         const user = userByTokenHash(tokenHash);
-        if (user) enterUser(user.id);
+        if (user) enterUser(user.id, session, event);
       });
       return;
     }
@@ -630,24 +739,84 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- Presence exit (Stop hook) -----------------------------------------
-  // {token} -> mark building, add build_seconds, broadcast roster. Always 200.
+  // --- Presence exit (Stop / SessionEnd hook) ----------------------------
+  // {token, session?} -> that session is done; you only begin fading once your
+  // LAST session is gone (after a short grace). Always 200.
   if (method === 'POST' && urlPath === '/exit') {
     const parsed = await readJsonBody(req);
     if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
     const body = parsed.body;
     const token = body && typeof body.token === 'string' ? body.token.trim() : '';
+    const session = body && typeof body.session === 'string' ? body.session.slice(0, 80) : '';
     if (token) {
       const tokenHash = sha256(token);
       if (!limitPresence.allow(tokenHash)) { sendJson(res, 429, { error: 'rate limited' }); return; }
       sendJson(res, 200, { ok: true });
       setImmediate(() => {
         const user = userByTokenHash(tokenHash);
-        if (user) exitUser(user.id);
+        if (user) exitUser(user.id, session);
       });
       return;
     }
     sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // --- Image upload ------------------------------------------------------
+  // Auth via the x-bc-token header (NOT a URL — keeps the secret off the wire's
+  // visible surface). Only a builder who is CURRENTLY PRESENT may upload, same as
+  // the 'say' gate. The body is the raw image bytes; we sniff the type from the
+  // bytes, cap the size, mint a random filename on the volume, and return its
+  // /uploads/<file> path for the client to attach to a message.
+  if (method === 'POST' && urlPath === '/upload') {
+    const token = String(req.headers['x-bc-token'] || '').trim();
+    if (!token) { sendJson(res, 401, { error: 'unauthorized' }); return; }
+    const tokenHash = sha256(token);
+    if (!limitUpload.allow(tokenHash) || !limitUpload.allow('ip:' + clientIp(req))) {
+      sendJson(res, 429, { error: 'rate limited' }); return;
+    }
+    const user = userByTokenHash(tokenHash);
+    if (!user) { sendJson(res, 401, { error: 'unauthorized' }); return; }
+    // Presence gate: only builders whose agent is working may post (incl. images).
+    if (!isPresent(user.id)) { sendJson(res, 403, { error: 'not present' }); return; }
+
+    const raw = await readRawBody(req, MAX_UPLOAD_BYTES);
+    if (raw.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
+    if (!raw.ok || !raw.buffer || !raw.buffer.length) { sendJson(res, 400, { error: 'bad request' }); return; }
+
+    const ext = sniffImageExt(raw.buffer);
+    if (!ext) { sendJson(res, 415, { error: 'unsupported type' }); return; }
+
+    const file = crypto.randomBytes(16).toString('hex') + '.' + ext;
+    fs.writeFile(path.join(UPLOAD_DIR, file), raw.buffer, (err) => {
+      if (err) { console.error('[backchannel] upload write:', err); sendJson(res, 500, { error: 'write failed' }); return; }
+      sendJson(res, 200, { url: '/uploads/' + file });
+    });
+    return;
+  }
+
+  // --- Serve an uploaded image -------------------------------------------
+  // Files are confined to UPLOAD_DIR; nosniff + inline disposition so a browser
+  // treats them strictly as the image they are. Long cache: filenames are random
+  // and content is immutable.
+  if (method === 'GET' && urlPath.startsWith('/uploads/')) {
+    // basename() strips any path components, so traversal (../) is impossible;
+    // the startsWith check is a belt-and-suspenders confinement to UPLOAD_DIR.
+    const file = path.basename(decodeURIComponent(urlPath));
+    const resolved = path.join(UPLOAD_DIR, file);
+    if (!resolved.startsWith(UPLOAD_DIR + path.sep)) { sendText(res, 403, 'forbidden'); return; }
+    fs.readFile(resolved, (err, data) => {
+      if (err) { sendText(res, 404, 'not found'); return; }
+      const ext = path.extname(resolved).toLowerCase();
+      res.writeHead(200, {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Disposition': 'inline',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        ...CORS_HEADERS,
+      });
+      res.end(data);
+    });
     return;
   }
 
@@ -720,7 +889,7 @@ function meBlock(user) {
 // Send the last-50 history of a room to one socket (oldest first).
 function sendHistory(ws, room) {
   const rows = recentMessages(room.id, HISTORY_LIMIT);
-  const messages = rows.map((m) => ({ id: m.id, username: m.username, body: m.body, ts: m.created_at }));
+  const messages = rows.map((m) => ({ id: m.id, username: m.username, body: m.body, image: m.image || null, ts: m.created_at }));
   try { ws.send(JSON.stringify({ type: 'history', room: room.slug, messages })); } catch { /* harmless */ }
 }
 
@@ -744,12 +913,82 @@ function broadcastMessage(room, senderUserId, payload) {
     if (allowed && !allowed.has(ws.userId)) continue;
     try {
       ws.send(JSON.stringify({ ...payload, self: ws.userId === senderUserId }));
+      // This socket is actively viewing the room, so the line lands already read —
+      // advance its cursor so a later reload doesn't resurface it as unread.
+      if (payload.id) markRead(ws.userId, room.id, payload.id);
     } catch { /* a peer dying mid-broadcast must not abort the rest */ }
   }
 }
 
 function wsError(ws, message) {
   try { ws.send(JSON.stringify({ type: 'error', message })); } catch { /* harmless */ }
+}
+
+// ---------------------------------------------------------------------------
+// Typing indicators — ephemeral, in-memory only. Per room (by slug) we hold the
+// set of users currently typing, each with a self-expiring timer so a client
+// that vanishes mid-type can't leave a stale "typing…" hanging. Every change
+// re-broadcasts the room's typer list to the sockets viewing that room.
+// ---------------------------------------------------------------------------
+
+const TYPING_TTL_MS = 6 * 1000;          // a 'typing:true' is good for 6s without a refresh
+const typingByRoom = new Map();          // room slug -> Map(userId -> { username, timer })
+
+// Broadcast the current typer list for a room to everyone viewing it (membership-
+// gated for dm/group). Recipients filter themselves out client-side.
+function broadcastTyping(room) {
+  const m = typingByRoom.get(room.slug);
+  const users = m ? [...m.values()].map((v) => v.username) : [];
+  let allowed = null;
+  if (room.type !== 'channel') allowed = new Set(roomMemberIds(room.id));
+  const data = JSON.stringify({ type: 'typing', room: room.slug, users });
+  for (const ws of wss.clients) {
+    if (ws.readyState !== ws.OPEN || !ws.userId) continue;
+    if (ws.room !== room.slug) continue;
+    if (allowed && !allowed.has(ws.userId)) continue;
+    try { ws.send(data); } catch { /* harmless */ }
+  }
+}
+
+// Mark a user as typing (or not) in a room and re-broadcast. A true (re)arms the
+// TTL timer; a false (or the timer firing) removes them.
+function setTyping(room, userId, username, state) {
+  let m = typingByRoom.get(room.slug);
+  if (state) {
+    if (!m) { m = new Map(); typingByRoom.set(room.slug, m); }
+    const prev = m.get(userId);
+    if (prev && prev.timer) clearTimeout(prev.timer);
+    const timer = setTimeout(() => {
+      const mm = typingByRoom.get(room.slug);
+      if (mm && mm.delete(userId)) {
+        if (!mm.size) typingByRoom.delete(room.slug);
+        broadcastTyping(room);
+      }
+    }, TYPING_TTL_MS);
+    m.set(userId, { username, timer });
+    broadcastTyping(room);
+  } else {
+    if (!m) return;
+    const prev = m.get(userId);
+    if (!prev) return;
+    if (prev.timer) clearTimeout(prev.timer);
+    m.delete(userId);
+    if (!m.size) typingByRoom.delete(room.slug);
+    broadcastTyping(room);
+  }
+}
+
+// Drop a user's typing state from a specific room slug (used on disconnect).
+function clearTypingForSlug(slug, userId) {
+  const m = typingByRoom.get(slug);
+  if (!m) return;
+  const prev = m.get(userId);
+  if (!prev) return;
+  if (prev.timer) clearTimeout(prev.timer);
+  m.delete(userId);
+  if (!m.size) typingByRoom.delete(slug);
+  const room = roomBySlug(slug);
+  if (room) broadcastTyping(room);
 }
 
 wss.on('connection', (ws) => {
@@ -790,6 +1029,7 @@ wss.on('connection', (ws) => {
           rooms,
           dms: dms.map((d) => ({ id: d.id, slug: d.slug, name: d.name, type: d.type, members: d.members })),
           present: isPresent(user.id),
+          unread: unreadCountsForUser(user.id),
         }));
       } catch { /* harmless */ }
 
@@ -810,6 +1050,9 @@ wss.on('connection', (ws) => {
       if (!canAccessRoom(ws.userId, room)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
       ws.room = room.slug;
       sendHistory(ws, room);
+      // Entering a room catches you up: advance the read cursor to the newest
+      // message so the unread badge clears and stays cleared across reloads.
+      try { markRead(ws.userId, room.id, latestMessageId(room.id)); } catch (e) { console.error('[backchannel] markRead join:', e); }
       return;
     }
 
@@ -830,13 +1073,33 @@ wss.on('connection', (ws) => {
       if (!canAccessRoom(ws.userId, room)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
 
       let body = typeof msg.body === 'string' ? msg.body.trim() : '';
-      if (!body) return;
       if (body.length > MAX_BODY_LEN) body = body.slice(0, MAX_BODY_LEN);
+      // Optional image attachment: accept ONLY a /uploads/<file> path we minted
+      // (validated by shape), so a client can never smuggle an arbitrary URL in.
+      const image = (typeof msg.image === 'string' && UPLOAD_PATH_RE.test(msg.image)) ? msg.image : null;
+      // A message must carry text, an image, or both — empty is dropped.
+      if (!body && !image) return;
 
-      const { id, created_at } = insertMessage(room.id, ws.userId, ws.username, body);
+      const { id, created_at } = insertMessage(room.id, ws.userId, ws.username, body, image);
       broadcastMessage(room, ws.userId, {
-        type: 'msg', room: room.slug, id, username: ws.username, body, ts: created_at,
+        type: 'msg', room: room.slug, id, username: ws.username, body, image, ts: created_at,
       });
+      // Sending implies you're done typing — clear it even if the client didn't.
+      setTyping(room, ws.userId, ws.username, false);
+      return;
+    }
+
+    // --- typing: announce/clear typing state for a room -------------------
+    if (msg.type === 'typing') {
+      if (!ws.userId) return;
+      if (!limitTyping.allow(ws.userId)) return;       // silently drop floods
+      if (!isPresent(ws.userId)) return;               // only builders type
+      const ref = msg.room;
+      let room = null;
+      if (typeof ref === 'number') room = roomById(ref);
+      else if (typeof ref === 'string') room = roomBySlug(ref.trim()) || roomById(Number(ref));
+      if (!room || !canAccessRoom(ws.userId, room)) return;
+      setTyping(room, ws.userId, ws.username, !!msg.state);
       return;
     }
 
@@ -915,6 +1178,9 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (ws.userId) {
       detachSocket(ws.userId, ws);
+      // Clear any lingering typing state for this socket's room so a disconnect
+      // mid-type doesn't leave a stale "typing…" for everyone else.
+      if (ws.room) clearTypingForSlug(ws.room, ws.userId);
       // A user's last socket closing doesn't end their build (presence is hook-
       // driven), but refresh the roster so a fully-disconnected/idle user is
       // reflected on the next sweep.
