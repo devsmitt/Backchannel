@@ -337,6 +337,23 @@ export function updateToken(userId, newTokenHash) {
   stmtUpdateToken.run(newTokenHash, userId);
 }
 
+/**
+ * Fully erase a user: their messages, projects, read cursors, room memberships,
+ * and the user row itself. Frees the username + invalidates the token (it no
+ * longer resolves to any row). Private rooms they were in are left as-is (the
+ * other member just sees an empty/partial thread). Returns true if a row went.
+ */
+export function deleteUser(userId) {
+  const tx = db.transaction((id) => {
+    db.prepare('DELETE FROM messages WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM projects WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM room_reads WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM room_members WHERE user_id = ?').run(id);
+    return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes;
+  });
+  return tx(userId) > 0;
+}
+
 /** Set a user's tagline (already validated/capped by caller). */
 export function setTagline(userId, tagline) {
   stmtSetTagline.run(String(tagline).slice(0, CAPS.tagline), userId);

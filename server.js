@@ -35,6 +35,7 @@ import {
   userByName,
   userById,
   updateToken,
+  deleteUser,
   setTagline,
   recordEnter,
   recordExit,
@@ -155,11 +156,12 @@ const limitPairNew   = makeLimiter({ capacity: 10,  windowMs: 60 * 1000 });     
 const limitPairRedeem= makeLimiter({ capacity: 30,  windowMs: 60 * 1000 });        // /pair/redeem per IP: 30/min (guess guard)
 const limitPresence  = makeLimiter({ capacity: 120, windowMs: 60 * 1000 });        // /enter + /exit per token-hash combined: 120/min
 const limitRotate    = makeLimiter({ capacity: 5,   windowMs: 60 * 1000 });        // /rotate per token-hash: 5/min
+const limitDelete    = makeLimiter({ capacity: 5,   windowMs: 60 * 1000 });        // /delete per token-hash: 5/min
 const limitSay       = makeLimiter({ capacity: 20,  windowMs: 10 * 1000 });        // WS 'say' per userId: 20 / 10s
 const limitUpload    = makeLimiter({ capacity: 12,  windowMs: 60 * 1000 });        // /upload per token-hash: 12/min
 const limitTyping    = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'typing' per userId: 40 / 10s
 
-const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitRotate, limitSay, limitUpload, limitTyping];
+const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitRotate, limitDelete, limitSay, limitUpload, limitTyping];
 
 // Extract the client IP. Behind Railway's proxy the real client is the FIRST
 // hop in X-Forwarded-For; fall back to the socket address when no proxy header.
@@ -661,6 +663,39 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- Delete an account (leave backchannel) -----------------------------
+  // {token} -> if it resolves to a user, fully erase them (messages, projects,
+  // memberships, read cursors, the row) and drop their presence. The token stops
+  // working immediately. Owner-gated (needs the current token) + rate-limited.
+  // Unknown token -> 401 with the same shape; no existence leak.
+  if (method === 'POST' && urlPath === '/delete') {
+    const parsed = await readJsonBody(req);
+    if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
+    const body = parsed.body;
+    const token = body && typeof body.token === 'string' ? body.token.trim() : '';
+    if (!token) { sendJson(res, 400, { error: 'bad request' }); return; }
+    const tokenHash = sha256(token);
+    if (!limitDelete.allow(tokenHash) || !limitDelete.allow('ip:' + clientIp(req))) {
+      sendJson(res, 429, { error: 'rate limited' }); return;
+    }
+    const user = userByTokenHash(tokenHash);
+    if (!user) { sendJson(res, 401, { error: 'unauthorized' }); return; }
+    try {
+      // Drop presence first (clears them from the roster), then erase. Close any
+      // live sockets so they can't keep acting as a now-deleted user.
+      fade(user.id);
+      const set = userSockets.get(user.id);
+      if (set) for (const ws of set) { try { ws.close(); } catch {} }
+      deleteUser(user.id);
+      broadcastRoster();
+      sendJson(res, 200, { ok: true });
+    } catch (e) {
+      console.error('[backchannel] delete:', e);
+      sendJson(res, 500, { error: 'delete failed' });
+    }
+    return;
+  }
+
   // --- Pairing: mint a single-use code from a (long) token --------------
   // {token} -> resolve to a user; mint an 8-char url-safe, 5-min, single-use
   // code bound to that user. Returns 200 {code}. Unknown token -> 400.
@@ -843,6 +878,16 @@ const server = http.createServer(async (req, res) => {
       const baked = origin ? data.split('https://backchannel.example').join(origin) : data;
       res.writeHead(200, { 'Content-Type': 'text/x-shellscript; charset=utf-8', ...CORS_HEADERS });
       res.end(baked);
+    });
+    return;
+  }
+
+  // --- The uninstaller (removes hooks, shell integration, local config) --
+  if (method === 'GET' && urlPath === '/uninstall.sh') {
+    fs.readFile(path.join(__dirname, 'adapters', 'claude-code', 'uninstall.sh'), 'utf8', (err, data) => {
+      if (err) { sendText(res, 500, 'uninstaller unavailable'); return; }
+      res.writeHead(200, { 'Content-Type': 'text/x-shellscript; charset=utf-8', ...CORS_HEADERS });
+      res.end(data);
     });
     return;
   }
