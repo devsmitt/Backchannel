@@ -84,6 +84,12 @@
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 26px; border-bottom: 1px solid var(--line);
   }
+  .hgroup { display: flex; align-items: center; gap: 14px; }
+  .railtoggle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; background: none; border: 1px solid var(--line); color: var(--dim); cursor: pointer; flex: 0 0 auto; }
+  .railtoggle:hover { color: var(--text); border-color: var(--ghost); }
+  .railtoggle svg { width: 15px; height: 15px; }
+  body.rail-collapsed .body { grid-template-columns: 0 1fr; }
+  body.rail-collapsed aside { display: none; }
   .wordmark { font-family: var(--mono); font-size: 13px; letter-spacing: 0.34em; text-transform: uppercase; }
   .wordmark b { color: var(--live); font-weight: 600; }
   .nowcount { font-family: var(--mono); font-size: 12px; color: var(--dim); letter-spacing: 0.04em; }
@@ -109,8 +115,8 @@
   .theme-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; background: none; border: 1px solid var(--line); color: var(--dim); cursor: pointer; }
   .theme-toggle:hover { color: var(--text); border-color: var(--ghost); }
   .theme-toggle svg { width: 14px; height: 14px; }
-  .swatches { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-  .swatch { width: 14px; height: 14px; border-radius: 50%; background: var(--sw); border: none; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3); transition: transform 120ms ease; }
+  .swatches { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .swatch { width: 13px; height: 13px; border-radius: 50%; background: var(--sw); border: none; cursor: pointer; padding: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3); transition: transform 120ms ease; }
   .swatch:hover { transform: scale(1.18); }
   .swatch.sel { box-shadow: 0 0 0 2px var(--rail), 0 0 0 3.5px var(--sw); }
   .section { margin-bottom: 22px; }
@@ -386,7 +392,10 @@
   <!-- ============================== PRESENT: the full app ============================== -->
   <div class="app">
     <header>
-      <div class="wordmark">backchannel</div>
+      <div class="hgroup">
+        <button class="railtoggle" id="railToggle" type="button" title="hide sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg></button>
+        <div class="wordmark">backchannel</div>
+      </div>
       <div class="nowcount"><span class="n" id="nowCount">0</span> active now</div>
       <div class="reconn"><span class="pip"></span> reconnecting</div>
       <div class="me" id="meBtn"><span class="h" id="meName">&nbsp;</span><span class="dot live"></span></div>
@@ -551,6 +560,7 @@
   let showAllOffline = false;    // roster offline expand toggle
   let lastRoster    = { active: [], building: [], offline: [] };
   let me            = null;      // {username,tagline,streak,totalBuilds,buildSeconds,since}
+  let userColors    = {};        // username -> their chosen identity color (#hex)
 
   // ---- Unread → tab title + favicon ----------------------------------------
   function totalUnread() {
@@ -657,6 +667,27 @@
   // Channel display name: we render the "#" glyph ourselves, so strip any leading
   // "#" the stored name may carry — otherwise we'd get a double hash (##general).
   function channelName(r) { return String((r && (r.name || r.slug)) || "").replace(/^#+\s*/, ""); }
+
+  // Each builder's identity color. A user's chosen accent (set_color) becomes the
+  // color everyone sees their name in; until they pick one, it's derived from
+  // their username so the channel is colorful by default.
+  function derivedColor(name) {
+    let h = 0; const s = String(name || "");
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return ACCENTS[h % ACCENTS.length].hex;
+  }
+  function colorFor(name) {
+    const c = userColors[name];
+    return (c && /^#[0-9a-f]{6}$/i.test(c)) ? c : derivedColor(name);
+  }
+  // Repaint every rendered message name to its author's current color.
+  function recolorStream() {
+    streamColEl.querySelectorAll(".msg").forEach((row) => {
+      const u = row.dataset.user; if (!u) return;
+      const nameEl = row.querySelector(".name");
+      if (nameEl) nameEl.style.color = colorFor(u);
+    });
+  }
   function findRoom(key) {
     return rooms.find((r) => roomKey(r) === key) ||
            dms.find((r) => String(r.id) === key || r.slug === key) || null;
@@ -744,6 +775,11 @@
       building: r.building || [],
       offline: Array.isArray(r.offline) ? r.offline : [],
     };
+    // Learn everyone's identity color from the roster, then repaint open messages.
+    [].concat(lastRoster.active, lastRoster.building, lastRoster.offline).forEach((p) => {
+      if (p && typeof p === "object" && p.username && p.color) userColors[p.username] = p.color;
+    });
+    recolorStream();
     const offlineCount = Array.isArray(r.offline) ? r.offline.length
                        : (typeof r.offline === "number" ? r.offline : 0);
 
@@ -762,7 +798,7 @@
         '<span class="dot ' + (idleCls ? "building" : "live") + '"></span>' +
         '<div class="who">' +
           '<div class="name">' +
-            '<span class="handle">@' + esc(p.username) + '</span>' +
+            '<span class="handle" style="color:' + colorFor(p.username) + '">@' + esc(p.username) + '</span>' +
             (sc > 0 ? '<span class="streak">' + esc(String(sc)) + 'd</span>' : '') +
           '</div>' +
           (p.tagline ? '<div class="doing">' + esc(p.tagline) + '</div>' : '') +
@@ -873,9 +909,11 @@
     const cont = lastSender === m.username;
     const row = document.createElement("div");
     row.className = "msg" + (cont ? " cont" : "") + (isSelf ? " self" : "");
+    row.dataset.user = m.username;   // so recolorStream can repaint by author
     if (!cont) {
       const nameEl = document.createElement("div");
       nameEl.className = "name";
+      nameEl.style.color = colorFor(m.username);   // name in the author's identity color
       nameEl.innerHTML = '@' + esc(m.username) +
         (m.ts ? ' <span class="time">' + esc(fmtTime(m.ts)) + '</span>' : '');
       // click handle -> profile (but not the timestamp)
@@ -993,6 +1031,14 @@
     meNameEl.textContent = "@" + username;
     notpresentWho.innerHTML = "signed in as <b>@" + esc(username) + "</b>";
 
+    // Your identity color is your accent, synced via the server across devices.
+    // If the server has one, adopt it as this device's accent; otherwise claim
+    // this device's current accent as your color.
+    const validColor = me && me.color && /^#[0-9a-f]{6}$/i.test(me.color);
+    const myColor = validColor ? me.color : currentAccent();
+    setAccentLocal(myColor);
+    if (!validColor) send({ type: "set_color", color: myColor });
+
     if (!currentRoom && rooms[0]) currentRoom = roomKey(rooms[0]);
     renderRooms(); renderDms(); markRoomHead();
     updateTitle();  // reflect any seeded unread in the tab title/favicon
@@ -1097,6 +1143,7 @@
   function onProfileData(u) {
     if (!u) return;
     const isYou = u.username === username;
+    if (u.color) userColors[u.username] = u.color;   // learn their color
     const btStr = fmtBuildTime(u.buildSeconds);
     const sinceStr = u.since ? new Date(u.since).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
 
@@ -1108,7 +1155,7 @@
           (isYou ? '' : '<button class="profile-message" id="msgBtn" title="message @' + esc(u.username) + '">' + MSG_ICON + 'message</button>') +
           '<button class="profile-close" id="pClose">×</button>' +
         '</div>' +
-        '<div class="profile-handle' + (isYou ? ' you' : '') + '">@' + esc(u.username) + '</div>' +
+        '<div class="profile-handle' + (isYou ? ' you' : '') + '" style="color:' + colorFor(u.username) + '">@' + esc(u.username) + '</div>' +
         '<div class="profile-since">building here since ' + esc(sinceStr) + '</div>' +
         '<div id="taglineView" class="profile-tagline' + (u.tagline ? '' : ' placeholder') + '">' +
           (u.tagline ? esc(u.tagline) : (isYou ? 'add a tagline' : 'no tagline yet')) +
@@ -1727,12 +1774,16 @@
   const DEFAULT_ACCENT = "#5fd99a";
   const ACCENTS = [
     { name: "green",    hex: "#5fd99a" },
-    { name: "terminal", hex: "#ffb000" },
+    { name: "teal",     hex: "#45d6c4" },
     { name: "blue",     hex: "#5cc8ff" },
+    { name: "indigo",   hex: "#8c9eff" },
     { name: "purple",   hex: "#b693fb" },
     { name: "pink",     hex: "#ff7eb6" },
     { name: "red",      hex: "#ff6b6b" },
+    { name: "orange",   hex: "#ff9558" },
+    { name: "terminal", hex: "#ffb000" },
     { name: "yellow",   hex: "#e8d44d" },
+    { name: "lime",     hex: "#a6e05f" },
   ];
   const SUN_ICON  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
   const MOON_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
@@ -1765,11 +1816,21 @@
       wrap.appendChild(b);
     });
   }
-  function applyAccent(hex) {
+  // Local-only: set the theme accent on this device (no server broadcast).
+  function setAccentLocal(hex) {
     document.documentElement.style.setProperty("--accent", hex);
     try { localStorage.setItem(ACCENT_KEY, hex); } catch (_) {}
+    if (username) userColors[username] = hex;
     renderSwatches();
     updateTitle();   // refresh the favicon's accent-colored unread dot
+  }
+  // User picked a swatch: set it locally AND publish it as their identity color
+  // so everyone sees their name in it. Repaint own messages + roster immediately.
+  function applyAccent(hex) {
+    setAccentLocal(hex);
+    send({ type: "set_color", color: hex });
+    recolorStream();
+    renderRoster(lastRoster);
   }
   function setTheme(light) {
     document.documentElement.classList.toggle("theme-light", !!light);
@@ -1782,6 +1843,27 @@
     if (btn) btn.addEventListener("click", () => setTheme(!isLight()));
     renderThemeToggle();
     renderSwatches();
+  })();
+
+  // ---- Collapsible sidebar (persisted) ------------------------------------
+  // Hide the rail so the window can sit thin and save monitor space. Applied at
+  // init (before the app is shown on presence) so there's no flash.
+  const RAIL_KEY = "backchannel-rail";
+  function applyRail(collapsed) {
+    body.classList.toggle("rail-collapsed", !!collapsed);
+    const b = document.getElementById("railToggle");
+    if (b) b.title = collapsed ? "show sidebar" : "hide sidebar";
+  }
+  (() => {
+    let collapsed = false;
+    try { collapsed = localStorage.getItem(RAIL_KEY) === "1"; } catch (_) {}
+    applyRail(collapsed);
+    const b = document.getElementById("railToggle");
+    if (b) b.addEventListener("click", () => {
+      collapsed = !body.classList.contains("rail-collapsed");
+      try { localStorage.setItem(RAIL_KEY, collapsed ? "1" : "0"); } catch (_) {}
+      applyRail(collapsed);
+    });
   })();
 
   // reconnect on tab focus if the socket died; also clear "hidden" unread since
