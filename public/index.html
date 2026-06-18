@@ -400,6 +400,10 @@
        drop the menu full width under the top bar */
     .roomswitch .rt .rt-caret { font-size: 15px; color: var(--text); }
     .roommenu { left: 0; right: 0; transform: none; top: 100%; min-width: 0; max-width: none; border-radius: 0 0 12px 12px; border-left: none; border-right: none; }
+    /* roomier tap targets + a tighter wordmark so small phones don't crowd */
+    .roommenu .rm-item { padding: 11px 12px; }
+    .wordmark { font-size: 12px; letter-spacing: 0.18em; }
+    .roomswitch .rt { padding: 6px 10px; }
   }
   @media (prefers-reduced-motion: reduce) { .reconn .pip { animation: none; } }
 </style>
