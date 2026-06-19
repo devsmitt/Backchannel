@@ -653,7 +653,7 @@
         <button class="gifx" id="gifClose" type="button" aria-label="close">×</button>
       </div>
       <div class="gifgrid" id="gifGrid"></div>
-      <div class="giffoot">via Tenor</div>
+      <div class="giffoot">Powered by GIPHY</div>
     </div>
   </div>
 
@@ -1209,8 +1209,8 @@
       a.appendChild(img);
       row.appendChild(a);
     }
-    // GIF attachment: only a Tenor media URL (host allow-listed) is rendered.
-    if (m.gif && /^https:\/\/media\d*\.tenor\.com\/[\w\-/.]+\.gif$/i.test(m.gif)) {
+    // GIF attachment: only a GIPHY media URL (host allow-listed) is rendered.
+    if (m.gif && /^https:\/\/media\d*\.giphy\.com\/media\/[^\s?#]+\.gif(\?[^\s#]*)?$/i.test(m.gif)) {
       const a = document.createElement("a");
       a.href = m.gif; a.target = "_blank"; a.rel = "noopener noreferrer";
       const img = document.createElement("img");

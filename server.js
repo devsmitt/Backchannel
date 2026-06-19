@@ -111,10 +111,11 @@ const HISTORY_LIMIT = 50;               // backlog returned on room entry.
 // only these. A closed set keeps the data clean and the UI tidy.
 const REACTIONS = ['👍', '🔥', '🎉', '👀', '❤️', '😂', '🙌', '🚀'];
 const REACTION_SET = new Set(REACTIONS);
-// GIFs via Tenor (Google). The key stays server-side; the client hits our proxy.
-// A chosen GIF is stored/rendered as a Tenor media URL, allow-listed by host.
-const TENOR_API_KEY = process.env.TENOR_API_KEY || '';
-const TENOR_GIF_RE = /^https:\/\/media\d*\.tenor\.com\/[\w\-/.]+\.gif$/i;
+// GIFs via GIPHY. The key stays server-side; the client hits our proxy. A chosen
+// GIF is stored/rendered as a GIPHY media URL, allow-listed by host (query string
+// allowed — GIPHY appends cid/ct tracking params to its media URLs).
+const GIPHY_API_KEY = process.env.GIPHY_API_KEY || '';
+const GIPHY_GIF_RE = /^https:\/\/media\d*\.giphy\.com\/media\/[^\s?#]+\.gif(\?[^\s#]*)?$/i;
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES) || 5 * 1024 * 1024; // 5MB image ceiling.
 // A stored image path is ALWAYS of the form /uploads/<file> where <file> is the
 // random name we minted. The client must never be able to point this at anything
@@ -646,26 +647,26 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- GIF search/trending proxy (Tenor) --------------------------------
-  // The Tenor key stays server-side; the client hits us with its token. We
+  // --- GIF search/trending proxy (GIPHY) --------------------------------
+  // The GIPHY key stays server-side; the client hits us with its token. We
   // return only trimmed {id, preview, gif, w, h, alt} rows. Signed-in + rate-
-  // limited per IP so a leaked URL can't burn our quota. contentfilter=high.
+  // limited per IP so a leaked URL can't burn our quota. rating=g for safety.
   if (method === 'GET' && (urlPath === '/gif/search' || urlPath === '/gif/featured')) {
-    if (!TENOR_API_KEY) { sendJson(res, 503, { error: 'gifs unavailable' }); return; }
+    if (!GIPHY_API_KEY) { sendJson(res, 503, { error: 'gifs unavailable' }); return; }
     const tok = (req.headers['x-bc-token'] || '').toString().trim();
     if (!tok || !userByTokenHash(sha256(tok))) { sendJson(res, 401, { error: 'unauthorized' }); return; }
     if (!limitGif.allow('ip:' + clientIp(req))) { sendJson(res, 429, { error: 'rate limited' }); return; }
     const qs = new URLSearchParams((req.url || '').split('?')[1] || '');
     const q = (qs.get('q') || '').slice(0, 100);
     const limit = Math.min(Math.max(Number(qs.get('limit')) || 24, 1), 48);
-    const base = urlPath === '/gif/search'
-      ? 'https://tenor.googleapis.com/v2/search'
-      : 'https://tenor.googleapis.com/v2/featured';
+    const isSearch = urlPath === '/gif/search';
+    const base = isSearch
+      ? 'https://api.giphy.com/v1/gifs/search'
+      : 'https://api.giphy.com/v1/gifs/trending';
     const params = new URLSearchParams({
-      key: TENOR_API_KEY, client_key: 'backchannel', limit: String(limit),
-      media_filter: 'tinygif,mediumgif', contentfilter: 'high',
+      api_key: GIPHY_API_KEY, limit: String(limit), rating: 'g', bundle: 'messaging_non_clips',
     });
-    if (urlPath === '/gif/search') {
+    if (isSearch) {
       if (!q.trim()) { sendJson(res, 200, { results: [] }); return; }
       params.set('q', q);
     }
@@ -673,21 +674,22 @@ const server = http.createServer(async (req, res) => {
       const r = await fetch(base + '?' + params.toString());
       if (!r.ok) { sendJson(res, 502, { error: 'gif upstream' }); return; }
       const data = await r.json();
-      const results = (Array.isArray(data.results) ? data.results : []).map((g) => {
-        const mf = g.media_formats || {};
-        const tiny = mf.tinygif || {}, med = mf.mediumgif || mf.gif || {};
+      const results = (Array.isArray(data.data) ? data.data : []).map((g) => {
+        const im = g.images || {};
+        const prev = im.fixed_width_small || im.fixed_height_small || im.preview_gif || {};
+        const full = im.downsized_medium || im.fixed_height || im.original || {};
         return {
           id: g.id,
-          preview: tiny.url || med.url,
-          gif: med.url || tiny.url,
-          w: (tiny.dims && tiny.dims[0]) || 0,
-          h: (tiny.dims && tiny.dims[1]) || 0,
-          alt: (g.content_description || 'gif').slice(0, 120),
+          preview: prev.url || full.url,
+          gif: full.url || prev.url,
+          w: Number(prev.width) || 0,
+          h: Number(prev.height) || 0,
+          alt: (g.title || 'gif').slice(0, 120),
         };
-      }).filter((x) => x.preview && TENOR_GIF_RE.test(x.gif || ''));
+      }).filter((x) => x.preview && GIPHY_GIF_RE.test(x.gif || ''));
       sendJson(res, 200, { results });
     } catch (e) {
-      console.error('[backchannel] tenor:', e && e.message);
+      console.error('[backchannel] giphy:', e && e.message);
       sendJson(res, 502, { error: 'gif fetch failed' });
     }
     return;
@@ -1304,8 +1306,8 @@ wss.on('connection', (ws) => {
       // Optional image attachment: accept ONLY a /uploads/<file> path we minted
       // (validated by shape), so a client can never smuggle an arbitrary URL in.
       const image = (typeof msg.image === 'string' && UPLOAD_PATH_RE.test(msg.image)) ? msg.image : null;
-      // A chosen GIF arrives as a Tenor media URL; accept only allow-listed hosts.
-      const gif = (typeof msg.gif === 'string' && TENOR_GIF_RE.test(msg.gif)) ? msg.gif : null;
+      // A chosen GIF arrives as a GIPHY media URL; accept only allow-listed hosts.
+      const gif = (typeof msg.gif === 'string' && GIPHY_GIF_RE.test(msg.gif)) ? msg.gif : null;
       // A message must carry text, an image, or a gif — empty is dropped.
       if (!body && !image && !gif) return;
 
