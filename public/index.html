@@ -323,9 +323,11 @@
   .lander-mark { font-family: var(--mono); font-size: 19px; letter-spacing: 0.36em; text-transform: uppercase; color: var(--text); margin-top: 8px; }
   .lander-line { margin: 14px auto 0; font-size: 17px; line-height: 1.6; color: var(--dim); max-width: 30ch; }
   .lander-sub { margin: 22px auto 0; font-size: 13px; line-height: 1.7; color: var(--faint); max-width: 44ch; }
+  .gate .lander-sub { margin-top: 16px; }   /* beats `.gate p {margin:0}`; gives the indicator a touch of room above the paragraph */
   .lander-note { margin: 28px auto 0; font-family: var(--mono); font-size: 11px; line-height: 1.6; letter-spacing: 0.02em; color: var(--ghost); max-width: 40ch; }
 
-  .pulse { display: inline-flex; align-items: center; gap: 8px; margin: 22px auto 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--dim); }
+  .pulse { display: flex; width: fit-content; align-items: center; gap: 8px; margin: 63px auto 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--dim); }
+  .pulse[hidden] { display: none; }   /* the class sets display:flex, which would otherwise defeat the hidden attribute */
   .pulse::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 8px color-mix(in srgb, var(--live) 60%, transparent); }
 
   .installblock { margin: 28px auto 0; max-width: 380px; text-align: left; }
