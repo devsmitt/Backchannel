@@ -1269,6 +1269,13 @@
     if (row) renderReactions(row, m.reactions, m.mine);
   }
 
+  // an admin removed a message — drop it from the open stream if we're viewing it
+  function onMsgDeleted(m) {
+    if (!m || m.room !== currentRoom) return;
+    const row = msgRowById(m.id);
+    if (row) row.remove();
+  }
+
   // tiny emoji popover, one shared instance
   let reactionPickerEl = null, reactionPickerMid = null;
   function ensureReactionPicker() {
@@ -1402,6 +1409,7 @@
         case "roster":       renderRoster(m); break;
         case "history":      renderHistory(m.room, m.messages); break;
         case "msg":          onMsg(m); break;
+        case "msg_deleted":  onMsgDeleted(m); break;
         case "reaction":     onReaction(m); break;
         case "typing":       onTyping(m); break;
         case "room_opened":  onRoomOpened(m.room, m.focus); break;

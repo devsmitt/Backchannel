@@ -198,6 +198,8 @@ function migrate() {
   addColumnIfMissing('users', 'streak_days', 'streak_days INTEGER DEFAULT 0');
   addColumnIfMissing('users', 'last_build_day', "last_build_day TEXT DEFAULT ''");
   addColumnIfMissing('users', 'color', "color TEXT DEFAULT ''");
+  // admin: a banned user keeps their row (username stays claimed) but is locked out.
+  addColumnIfMissing('users', 'banned', 'banned INTEGER NOT NULL DEFAULT 0');
 
   // messages: optional image attachment (a /uploads/<file> path).
   addColumnIfMissing('messages', 'image', 'image TEXT');
@@ -599,10 +601,14 @@ export function updateToken(userId, newTokenHash) {
  */
 export function deleteUser(userId) {
   const tx = db.transaction((id) => {
-    db.prepare('DELETE FROM messages WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM reactions WHERE user_id = ?').run(id);          // their reactions
+    db.prepare('DELETE FROM messages WHERE user_id = ?').run(id);           // their messages
+    db.prepare('DELETE FROM reactions WHERE message_id NOT IN (SELECT id FROM messages)').run(); // others' reactions on those messages
     db.prepare('DELETE FROM projects WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM room_reads WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM room_members WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM device_tokens WHERE user_id = ?').run(id);      // their paired environments
+    db.prepare('DELETE FROM invites WHERE owner_id = ?').run(id);           // codes they held to share (used_by refs left intact: still spent)
     return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes;
   });
   return tx(userId) > 0;
@@ -1025,6 +1031,108 @@ export function profileByName(username) {
     color: u.color || '',
     projects: listProjects(u.id),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Admin surface — owner-only operations backing the /admin/* endpoints. All are
+// read or thin-write; full user erasure goes through the canonical deleteUser so
+// cleanup stays in one place. None of these touch auth/secrets.
+// ---------------------------------------------------------------------------
+
+/** Set/clear a user's banned flag. */
+export function setBanned(userId, flag) {
+  stmtSetBanned.run(flag ? 1 : 0, userId);
+}
+const stmtSetBanned = db.prepare('UPDATE users SET banned = ? WHERE id = ?');
+
+/** Roster for the owner: every user with device + message counts (no secrets). */
+export function adminListUsers() {
+  return db.prepare(
+    `SELECT u.id, u.username, u.created_at, u.banned,
+            (SELECT COUNT(*) FROM device_tokens d WHERE d.user_id = u.id) AS devices,
+            (SELECT COUNT(*) FROM messages m WHERE m.user_id = u.id) AS messages
+       FROM users u ORDER BY u.created_at ASC, u.id ASC`
+  ).all();
+}
+
+/** Message + reaction counts for a single user (the `find` dossier). */
+export function adminUserStats(userId) {
+  return {
+    messages: db.prepare('SELECT COUNT(*) c FROM messages WHERE user_id = ?').get(userId).c,
+    reactions: db.prepare('SELECT COUNT(*) c FROM reactions WHERE user_id = ?').get(userId).c,
+  };
+}
+
+/** Per-user counts shown in the purge dry-run preview. */
+export function userEraseStats(userId) {
+  const c = (sql) => db.prepare(sql).get(userId).c;
+  return {
+    messages: c('SELECT COUNT(*) c FROM messages WHERE user_id = ?'),
+    projects: c('SELECT COUNT(*) c FROM projects WHERE user_id = ?'),
+    invites: c('SELECT COUNT(*) c FROM invites WHERE owner_id = ?'),
+    devices: c('SELECT COUNT(*) c FROM device_tokens WHERE user_id = ?'),
+  };
+}
+
+/** Every user NOT in keepIds (the purge target set). Empty keep -> everyone. */
+export function listUsersExcept(keepIds) {
+  const ids = Array.isArray(keepIds) ? keepIds.filter((x) => Number.isInteger(x)) : [];
+  if (!ids.length) return db.prepare('SELECT id, username FROM users ORDER BY id').all();
+  const ph = ids.map(() => '?').join(',');
+  return db.prepare(`SELECT id, username FROM users WHERE id NOT IN (${ph}) ORDER BY id`).all(...ids);
+}
+
+export function countMessages() { return db.prepare('SELECT COUNT(*) c FROM messages').get().c; }
+export function countOutstandingInvites() { return db.prepare('SELECT COUNT(*) c FROM invites WHERE used_by IS NULL').get().c; }
+export function countRoomsByType() { return db.prepare('SELECT type, COUNT(*) AS n FROM rooms GROUP BY type').all(); }
+
+/** Mint N invite codes OWNED by a user (cap 1..20). Returns the codes. */
+export function grantInvites(ownerId, n) {
+  const count = Math.max(1, Math.min(20, Math.floor(Number(n) || 0)));
+  return db.transaction(() => mintInvitesInner(ownerId, count))();
+}
+
+/** Mint N open/genesis codes (owner_id NULL) to hand out (cap 1..20). */
+export function mintOpenInvites(n) {
+  const count = Math.max(1, Math.min(20, Math.floor(Number(n) || 0)));
+  return db.transaction(() => {
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      let code = genInviteCode();
+      let tries = 0;
+      while (stmtInviteByCode.get(code) && tries++ < 5) code = genInviteCode();
+      stmtInsertInvite.run(code, null, Date.now());
+      out.push(code);
+    }
+    return out;
+  })();
+}
+
+/** Delete one UNUSED invite code; refuses spent codes (preserves the graph). */
+export function revokeInvite(code) {
+  const c = normInvite(code);
+  const inv = stmtInviteByCode.get(c);
+  if (!inv) return { ok: false, error: 'not_found' };
+  if (inv.used_by) return { ok: false, error: 'already_used' };
+  db.prepare('DELETE FROM invites WHERE code = ? AND used_by IS NULL').run(c);
+  return { ok: true, code: c };
+}
+
+/** Delete one message + its reactions (and unlink its image). Returns {ok, roomId}. */
+export function deleteMessage(messageId) {
+  const m = db.prepare('SELECT id, room_id, image FROM messages WHERE id = ?').get(messageId);
+  if (!m) return { ok: false };
+  db.transaction(() => {
+    db.prepare('DELETE FROM messages WHERE id = ?').run(messageId);
+    deleteReactionsForMessage(messageId);
+  })();
+  if (m.image) {
+    const file = path.basename(String(m.image));   // basename only — never trust the stored path
+    if (file && file !== '.' && file !== '..') {
+      try { fs.unlinkSync(path.join(UPLOAD_DIR, file)); } catch (e) { /* already gone / shared */ }
+    }
+  }
+  return { ok: true, roomId: m.room_id };
 }
 
 export default db;

@@ -5,3 +5,7 @@ node_modules
 
 # local preview helper (Claude preview MCP) — machine-specific paths
 .claude/launch.json
+
+# private admin docs + any local admin secret (never publish)
+ADMIN.md
+*.admin-secret

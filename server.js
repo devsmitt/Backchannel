@@ -68,6 +68,18 @@ import {
   reactionsForMessage,
   reactionsForMessages,
   messageById,
+  setBanned,
+  adminListUsers,
+  adminUserStats,
+  userEraseStats,
+  listUsersExcept,
+  countMessages,
+  countOutstandingInvites,
+  countRoomsByType,
+  grantInvites,
+  mintOpenInvites,
+  revokeInvite,
+  deleteMessage,
   markRead,
   unreadCountsForUser,
   UPLOAD_DIR,
@@ -187,8 +199,24 @@ const limitUpload    = makeLimiter({ capacity: 12,  windowMs: 60 * 1000 });     
 const limitTyping    = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'typing' per userId: 40 / 10s
 const limitReact     = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'react' per userId: 40 / 10s
 const limitGif       = makeLimiter({ capacity: 40,  windowMs: 60 * 1000 });        // /gif/* per IP: 40 / min
+const limitAdmin     = makeLimiter({ capacity: 60,  windowMs: 60 * 1000 });        // /admin/* per ip + global: 60 / min
 
-const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitVerify, limitDelete, limitSay, limitUpload, limitTyping, limitReact, limitGif];
+const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitVerify, limitDelete, limitSay, limitUpload, limitTyping, limitReact, limitGif, limitAdmin];
+
+// ---------------------------------------------------------------------------
+// Admin surface config. ADMIN_TOKEN is a high-entropy secret (>=32 chars) that
+// lives ONLY in the deploy env + the owner's local CLI. If it is unset or too
+// short, the ENTIRE /admin/* surface is disabled (uniform 404) — fail closed.
+// The token is fully decoupled from any user identity: no user token ever
+// confers admin, and a purge can never delete the owner.
+// ---------------------------------------------------------------------------
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+const ADMIN_ENABLED = ADMIN_TOKEN.length >= 32;
+const ADMIN_TOKEN_HASH = ADMIN_ENABLED ? crypto.createHash('sha256').update(ADMIN_TOKEN).digest() : null;
+// The real accounts: never deletable, always kept by a purge. (Edit to manage.)
+const PROTECTED_USERS = ['devon', 'john', 'johnz', 'backseats'];
+const PROTECTED_SET = new Set(PROTECTED_USERS);
+console.log('[backchannel] admin surface: ' + (ADMIN_ENABLED ? 'ENABLED' : 'DISABLED (set ADMIN_TOKEN, >=32 chars)'));
 
 // Extract the client IP. Behind Railway's proxy the real client is the FIRST
 // hop in X-Forwarded-For; fall back to the socket address when no proxy header.
@@ -625,9 +653,183 @@ function serveStatic(req, res) {
   });
 }
 
+// ===========================================================================
+// ADMIN SURFACE — owner-only terminal control plane. NO CORS (unusable from any
+// browser page), fail-closed when ADMIN_TOKEN is unset, constant-time auth,
+// uniform 404 on every failure so the surface's existence never leaks.
+// ===========================================================================
+
+// Admin responders deliberately DO NOT spread CORS_HEADERS.
+function adminSend(res, status, obj) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(obj == null ? '' : JSON.stringify(obj));
+}
+function adminDeny(res) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found\n'); }
+
+function adminDecorateUser(u) {
+  return {
+    id: u.id, username: u.username, created_at: u.created_at, banned: !!u.banned,
+    devices: u.devices, messages: u.messages,
+    present: isPresent(u.id), active: isPresent(u.id) && hasOpenTab(u.id),
+  };
+}
+// Drop a user from the live channel: end presence + close every authed socket.
+function adminDropUser(userId) {
+  try { fade(userId); } catch { /* ignore */ }
+  const set = userSockets.get(userId);
+  if (set) for (const ws of set) { try { ws.close(); } catch { /* ignore */ } }
+}
+// Tell open tabs to remove a deleted message (membership-gated like broadcastMessage).
+function broadcastDeleted(room, messageId) {
+  let allowed = null;
+  if (room.type !== 'channel') allowed = new Set(roomMemberIds(room.id));
+  for (const ws of wss.clients) {
+    if (ws.readyState !== ws.OPEN || !ws.userId) continue;
+    if (allowed && !allowed.has(ws.userId)) continue;
+    try { ws.send(JSON.stringify({ type: 'msg_deleted', room: room.slug, id: messageId })); } catch { /* ignore */ }
+  }
+}
+
+async function handleAdmin(req, res, method, urlPath) {
+  // 1) Fail closed — a misconfigured deploy has NO admin surface.
+  if (!ADMIN_ENABLED) return adminDeny(res);
+  // 2) Defense-in-depth rate limit (the 256-bit token is the real defense).
+  if (!limitAdmin.allow('admin:global') || !limitAdmin.allow('admin:' + clientIp(req))) return adminDeny(res);
+  // 3) Auth: header only, constant-time, uniform failure. Never logged.
+  const provided = req.headers['x-admin-token'];
+  if (typeof provided !== 'string' || provided.length === 0) return adminDeny(res);
+  const got = crypto.createHash('sha256').update(provided).digest();
+  if (got.length !== ADMIN_TOKEN_HASH.length || !crypto.timingSafeEqual(got, ADMIN_TOKEN_HASH)) return adminDeny(res);
+
+  const query = new URLSearchParams((req.url || '').split('?')[1] || '');
+  try {
+    // ---- reads ----
+    if (method === 'GET' && urlPath === '/admin/users') {
+      let rows = adminListUsers().map(adminDecorateUser);
+      const q = (query.get('q') || '').trim().toLowerCase();
+      if (q) rows = rows.filter((r) => r.username.includes(q));
+      return adminSend(res, 200, { users: rows });
+    }
+    if (method === 'GET' && urlPath === '/admin/stats') {
+      let presentNow = 0; for (const s of presence.values()) if (s && s.present) presentNow++;
+      let sockets = 0; for (const set of userSockets.values()) sockets += set.size;
+      return adminSend(res, 200, {
+        users: countUsers(), messages: countMessages(),
+        outstandingInvites: countOutstandingInvites(), rooms: countRoomsByType(),
+        presentNow, sockets,
+      });
+    }
+    if (method === 'GET' && urlPath === '/admin/find') {
+      const user = userByName(normalizeUsername(query.get('u') || ''));
+      if (!user) return adminSend(res, 404, { error: 'no_such_user' });
+      const st = adminUserStats(user.id);
+      return adminSend(res, 200, {
+        username: user.username, id: user.id, created_at: user.created_at,
+        banned: !!user.banned, protected: PROTECTED_SET.has(user.username),
+        present: isPresent(user.id), active: isPresent(user.id) && hasOpenTab(user.id),
+        sessions: (presence.get(user.id) && presence.get(user.id).sessions) ? presence.get(user.id).sessions.size : 0,
+        devices: listDevices(user.id), invites: invitesForUser(user.id),
+        privateRooms: userPrivateRooms(user.id).length,
+        messages: st.messages, reactions: st.reactions,
+      });
+    }
+
+    // ---- writes (parse body only AFTER auth) ----
+    if (method === 'POST') {
+      const parsed = await readJsonBody(req);
+      if (parsed.tooBig) return adminSend(res, 413, { error: 'too_large' });
+      const body = (parsed.ok && parsed.body) ? parsed.body : {};
+      const named = () => userByName(normalizeUsername(typeof body.username === 'string' ? body.username : ''));
+
+      if (urlPath === '/admin/kick') {
+        const u = named(); if (!u) return adminSend(res, 404, { error: 'no_such_user' });
+        adminDropUser(u.id); broadcastRoster();
+        return adminSend(res, 200, { ok: true, kicked: u.username });
+      }
+      if (urlPath === '/admin/ban') {
+        const u = named(); if (!u) return adminSend(res, 404, { error: 'no_such_user' });
+        setBanned(u.id, 1); revokeAllDevices(u.id); adminDropUser(u.id); broadcastRoster();
+        return adminSend(res, 200, { ok: true, banned: u.username });
+      }
+      if (urlPath === '/admin/unban') {
+        const u = named(); if (!u) return adminSend(res, 404, { error: 'no_such_user' });
+        setBanned(u.id, 0);
+        return adminSend(res, 200, { ok: true, unbanned: u.username });
+      }
+      if (urlPath === '/admin/delete') {
+        const name = normalizeUsername(typeof body.username === 'string' ? body.username : '');
+        if (!name) return adminSend(res, 400, { error: 'bad_username' });
+        if (PROTECTED_SET.has(name)) return adminSend(res, 403, { error: 'protected' });
+        const u = userByName(name); if (!u) return adminSend(res, 404, { error: 'no_such_user' });
+        adminDropUser(u.id); const ok = deleteUser(u.id); broadcastRoster();
+        return adminSend(res, 200, { ok, deleted: u.username });
+      }
+      if (urlPath === '/admin/grant-invites') {
+        const u = named(); if (!u) return adminSend(res, 404, { error: 'no_such_user' });
+        const n = Math.floor(Number(body.n));
+        if (!Number.isInteger(n) || n < 1 || n > 20) return adminSend(res, 400, { error: 'bad_n' });
+        return adminSend(res, 200, { ok: true, username: u.username, codes: grantInvites(u.id, n) });
+      }
+      if (urlPath === '/admin/genesis') {
+        const n = body.n == null ? 1 : Math.floor(Number(body.n));
+        if (!Number.isInteger(n) || n < 1 || n > 20) return adminSend(res, 400, { error: 'bad_n' });
+        return adminSend(res, 200, { ok: true, codes: mintOpenInvites(n) });
+      }
+      if (urlPath === '/admin/revoke-invite') {
+        if (typeof body.code !== 'string') return adminSend(res, 400, { error: 'bad_code' });
+        const r = revokeInvite(body.code);
+        if (!r.ok) return adminSend(res, r.error === 'not_found' ? 404 : 409, r);
+        return adminSend(res, 200, r);
+      }
+      if (urlPath === '/admin/delete-message') {
+        const id = Math.floor(Number(body.id));
+        if (!Number.isInteger(id) || id <= 0) return adminSend(res, 400, { error: 'bad_id' });
+        const r = deleteMessage(id);
+        if (!r.ok) return adminSend(res, 404, { error: 'no_such_message' });
+        const room = roomById(r.roomId);
+        if (room) broadcastDeleted(room, id);
+        return adminSend(res, 200, { ok: true, id });
+      }
+      if (urlPath === '/admin/purge-except') {
+        const keepIds = []; const missingFromKeep = [];
+        for (const name of PROTECTED_USERS) {
+          const u = userByName(name);
+          if (u) keepIds.push(u.id); else missingFromKeep.push(name);
+        }
+        const targets = listUsersExcept(keepIds);
+        if (body.confirm !== true) {   // STRICT: anything but boolean true is a dry-run
+          const wouldDelete = targets.map((t) => ({ id: t.id, username: t.username, ...userEraseStats(t.id) }));
+          return adminSend(res, 200, { dryRun: true, keep: PROTECTED_USERS, missingFromKeep, wouldDelete });
+        }
+        const deleted = []; const failed = [];
+        for (const t of targets) {
+          try { adminDropUser(t.id); if (deleteUser(t.id)) deleted.push(t.username); else failed.push(t.username); }
+          catch { failed.push(t.username); }
+        }
+        broadcastRoster();
+        return adminSend(res, 200, { dryRun: false, keep: PROTECTED_USERS, missingFromKeep, deleted, failed });
+      }
+    }
+    return adminSend(res, 404, { error: 'unknown_command' });
+  } catch (e) {
+    // Log a tag ONLY — never req/headers/body (could carry the secret).
+    console.error('[backchannel] admin error:', e && e.message);
+    return adminSend(res, 500, { error: 'admin_error' });
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const method = req.method || 'GET';
   const urlPath = (req.url || '/').split('?')[0];
+
+  // ===== ADMIN SURFACE — FIRST, before CORS preflight / static / 405 so it can
+  // never fall through. Decoded once so /admin%2f.. cannot slip past the prefix. =====
+  let adminPath = urlPath;
+  try { adminPath = decodeURIComponent(urlPath); } catch { /* malformed -> use raw */ }
+  if (adminPath === '/admin' || adminPath.startsWith('/admin/')) {
+    await handleAdmin(req, res, method, adminPath);
+    return;
+  }
 
   // CORS preflight: answer immediately.
   if (method === 'OPTIONS') { res.writeHead(204, CORS_HEADERS); res.end(); return; }
@@ -711,6 +913,9 @@ const server = http.createServer(async (req, res) => {
 
     if (!username || !token || !recovery) { sendJson(res, 400, { error: 'bad request' }); return; }
     if (!code) { sendJson(res, 403, { error: 'invite', reason: 'missing' }); return; }
+    // A banned username can never be reclaimed.
+    const existing = userByName(username);
+    if (existing && existing.banned) { sendJson(res, 403, { error: 'banned' }); return; }
 
     const result = claimWithInvite(username, sha256(token), sha256(recovery), code, deviceLabel(req, body && body.label));
     if (result.ok) {
@@ -740,6 +945,7 @@ const server = http.createServer(async (req, res) => {
     if (recoverBlocked(username)) { sendJson(res, 429, { error: 'too many attempts' }); return; }
     const user = userByName(username);
     if (!user || user.recovery_hash !== sha256(recovery)) { sendJson(res, 403, { error: 'no match' }); return; }
+    if (user.banned) { sendJson(res, 403, { error: 'banned' }); return; }   // banned: phrase can't recover back in
     try {
       revokeAllDevices(user.id);                                                  // wipe every environment
       addDeviceToken(user.id, sha256(newToken), deviceLabel(req, body && body.label)); // and pair this one fresh
@@ -858,6 +1064,10 @@ const server = http.createServer(async (req, res) => {
     }
     rec.used = true;
     pairings.delete(code);   // single-use
+
+    // A banned account's pre-minted code can't be redeemed into a fresh device.
+    const pairUser = userById(rec.userId);
+    if (pairUser && pairUser.banned) { sendJson(res, 403, { error: 'banned' }); return; }
 
     // Mint a brand-new token for this environment.
     let attempts = 0;
@@ -1232,7 +1442,7 @@ wss.on('connection', (ws) => {
       const token = typeof msg.token === 'string' ? msg.token.trim() : '';
       const tokenHash = token ? sha256(token) : '';
       const user = tokenHash ? userByTokenHash(tokenHash) : null;
-      if (!user) {
+      if (!user || user.banned) {   // banned tokens are already revoked; reject explicitly too
         wsError(ws, 'bad token');
         try { ws.close(); } catch { /* harmless */ }
         return;
