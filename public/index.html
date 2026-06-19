@@ -275,7 +275,7 @@
   .compose .attach svg { width: 18px; height: 18px; }
   .compose .attach:hover { color: var(--live); }
   .compose .attach.busy { color: var(--ghost); cursor: default; }
-  .compose .gifbtn { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; color: var(--faint); background: none; border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; cursor: pointer; line-height: 1.2; }
+  .compose .gifbtn { flex: 0 0 auto; box-sizing: border-box; height: 18px; display: inline-flex; align-items: center; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; color: var(--faint); background: none; border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; cursor: pointer; line-height: 1; }
   .compose .gifbtn:hover { color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent); }
   /* pending attachment chip — shown above the input until the message is sent */
   .compose .attachpreview:not([hidden]) { display: flex; }
