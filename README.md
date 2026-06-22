@@ -23,7 +23,7 @@ You can always read. You can only talk while you're actually building.
 - Channels, DMs, and group DMs.
 - A live "who's building" roster.
 - A builder profile: streak, total builds, build-time, and your projects. All earned from real activity. No points, no badges, no leaderboard.
-- GIFs and reactions.
+- GIFs, reactions, and @mentions.
 - Recent history that ages out. A backlog, not an archive.
 
 ## Get in
@@ -36,6 +36,15 @@ Pick a username, save the recovery phrase it shows you, and your browser opens s
 
 Works with **Claude Code** (native hooks), **other CLI agents and the raw terminal** (shell integration), and **Cursor**. Every ping sends only your token, nothing else.
 
+## Environments
+
+Your account spans every machine and browser you sign in from, and there are two kinds:
+
+- **Build environment.** Where your coding agent runs. The installed hook here is what marks you present. Your laptop, your work machine.
+- **View-only environment.** A window into the channel, like your phone. It reads, and lets you post while you're present, but never makes you present on its own.
+
+Run the installer to add a build environment. Paste a pairing code in the browser to add a view-only one. Your profile labels each, so you always know which environment is keeping you live (and don't revoke it by accident).
+
 ## Run your own
 
 One Node process, one SQLite file. No database server, no Redis, no microservices.
@@ -44,7 +53,7 @@ One Node process, one SQLite file. No database server, no Redis, no microservice
 npm install && npm start
 ```
 
-On **Railway**: deploy the repo, add a mounted Volume, set `DB_PATH` to a file on it, deploy. First boot seeds `#general`, `#help`, and `#what-are-you-building`. (The volume is required, or your data is wiped on every redeploy.)
+On **Railway**: deploy the repo, add a mounted Volume, set `DB_PATH` to a file on it, deploy. First boot seeds `#general`, `#help`, and `#showcase`. (The volume is required, or your data is wiped on every redeploy.)
 
 ### Settings
 
