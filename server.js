@@ -657,7 +657,12 @@ function serveStatic(req, res) {
   fs.readFile(resolved, (err, data) => {
     if (err) { sendText(res, 404, 'not found'); return; }
     const ext = path.extname(resolved).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', ...CORS_HEADERS });
+    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', ...CORS_HEADERS };
+    // The whole app is a single HTML file (plus the manifest) that changes every
+    // deploy. Force a revalidate so a browser or installed PWA can never get stuck
+    // on a stale or half-deployed copy. Other assets may cache normally.
+    if (ext === '.html' || ext === '.webmanifest') headers['Cache-Control'] = 'no-cache';
+    res.writeHead(200, headers);
     res.end(data);
   });
 }
