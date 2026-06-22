@@ -14,7 +14,7 @@
 // users/rooms if missing, creates room_members/projects if absent, and seeds the
 // three open channels only when none exist. A fresh boot creates everything.
 
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,7 +42,68 @@ const INVITE_GRANT = Number(process.env.INVITE_GRANT) || 3;
 // Crockford base32 (no I/L/O/U) — unambiguous to read aloud and type.
 const INVITE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
-const db = new Database(DB_PATH);
+// ---------------------------------------------------------------------------
+// Encryption at rest. If DB_KEY (64 hex chars = 32 bytes) is set, the WHOLE
+// database file is encrypted with SQLCipher — a leaked file or backup is just
+// noise without the key. No key -> plaintext (local/dev), unchanged behavior.
+// An existing plaintext file is migrated in place (encrypt-on-boot) the first
+// time a key is present; the migration is verified before the plaintext copy
+// is dropped, and refuses to start on a key mismatch (never a parallel DB).
+// LOSING DB_KEY MEANS LOSING THE DATABASE — keep it in the deploy env + a safe
+// local copy.
+// ---------------------------------------------------------------------------
+const RAW_DB_KEY = (process.env.DB_KEY || '').trim();
+if (RAW_DB_KEY && !/^[0-9a-fA-F]{64}$/.test(RAW_DB_KEY)) {
+  throw new Error('DB_KEY is set but invalid — it must be exactly 64 hex chars (32 bytes).');
+}
+const DB_ENCRYPTED = RAW_DB_KEY.length === 64;
+
+function applyDbKey(conn) {
+  conn.pragma('cipher = "sqlcipher"');
+  conn.pragma(`key = "x'${RAW_DB_KEY}'"`);
+}
+function isPlaintextSqliteFile(p) {
+  try {
+    const fd = fs.openSync(p, 'r');
+    const buf = Buffer.alloc(16);
+    const n = fs.readSync(fd, buf, 0, 16, 0);
+    fs.closeSync(fd);
+    return n >= 16 && buf.toString('latin1').startsWith('SQLite format 3');
+  } catch { return false; }   // missing/empty file -> fresh, not "plaintext to migrate"
+}
+function migratePlaintextInPlace() {
+  const bak = DB_PATH + '.pre-encrypt.bak';
+  fs.copyFileSync(DB_PATH, bak);                                  // safety copy until verified
+  const plain = new Database(DB_PATH);                            // opens plaintext
+  plain.pragma('journal_mode = DELETE');                          // rekey is rejected in WAL: checkpoint + drop the WAL first
+  const tables = plain.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+  const before = {};
+  for (const t of tables) before[t] = plain.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get().c;
+  plain.pragma('cipher = "sqlcipher"');
+  plain.pragma(`rekey = "x'${RAW_DB_KEY}'"`);                     // encrypt the file in place
+  plain.close();
+  const enc = new Database(DB_PATH);                              // verify with the key
+  applyDbKey(enc);
+  for (const t of tables) {
+    const after = enc.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get().c;
+    if (after !== before[t]) { enc.close(); throw new Error(`encryption verify failed for "${t}" (${before[t]} -> ${after}); plaintext backup kept at ${bak}`); }
+  }
+  enc.close();
+  fs.unlinkSync(bak);                                             // verified -> no plaintext left behind
+  console.log('[backchannel] migrated database to encrypted-at-rest (in place)');
+}
+function openDatabase() {
+  if (!DB_ENCRYPTED) return new Database(DB_PATH);                // plaintext (no key configured)
+  if (isPlaintextSqliteFile(DB_PATH)) migratePlaintextInPlace();
+  const conn = new Database(DB_PATH);
+  applyDbKey(conn);
+  try { conn.prepare('SELECT COUNT(*) FROM sqlite_master').get(); }   // proves the key is right
+  catch { conn.close(); throw new Error('DB_KEY does not match the encrypted database — refusing to start.'); }
+  return conn;
+}
+
+const db = openDatabase();
+console.log('[backchannel] database at rest: ' + (DB_ENCRYPTED ? 'ENCRYPTED' : 'plaintext (no DB_KEY)'));
 // WAL gives us better concurrent read behavior under the live socket load.
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
