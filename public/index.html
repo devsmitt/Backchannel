@@ -2,9 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="color-scheme" content="dark" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="color-scheme" content="dark light" />
 <title>backchannel</title>
+<!-- PWA / mobile-app polish: standalone display, themed status bar, home-screen icon. -->
+<meta name="theme-color" content="#0a0b0d" id="themeColorMeta" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="backchannel" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<!-- The browser-tab favicon is managed dynamically (link#favicon, pulses on unread);
+     these only cover the PWA home-screen icon, so they never collide with it. -->
+<link rel="apple-touch-icon" href="/icon.svg" />
 <style>
   /*
     BACKCHANNEL v2 — locked design (monochrome dark + one accent green).
@@ -77,11 +87,15 @@
   .dot.offline { background: transparent; border: 1px solid var(--ghost); }
 
   /* ============================================================ PRESENT: the app */
-  .app { display: none; grid-template-rows: auto 1fr; height: 100vh; }
+  .app { display: none; grid-template-rows: auto 1fr; height: 100vh; height: 100dvh; }
   /* The app is also rendered (behind the closed doors) while not-present, so the
      doors slide shut OVER the live channel when you fade out. Only interactive,
      and only on top, once you're actually present. */
   body.present .app, body.notpresent .app { display: grid; }
+  /* In the app (and behind the not-present doors) only .stream scrolls — never the
+     page. Stops the mobile URL bar / rubber-band from dragging the whole UI around
+     and pulling the top bar off-screen. The signed-out lander stays scrollable. */
+  body.present, body.notpresent { overflow: hidden; }
 
   /* ---- The doors: black panels that part to reveal the channel ---- */
   .doors { display: none; position: fixed; inset: 0; z-index: 20; pointer-events: none; }
@@ -202,7 +216,7 @@
   .peoplemenu .pm-item .pm-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .peoplemenu .pm-empty { padding: 10px; color: var(--faint); font-size: 12.5px; }
 
-  .stream { overflow-y: auto; padding: 22px 40px 12px; display: flex; flex-direction: column; scrollbar-width: thin; }
+  .stream { overflow-y: auto; padding: 22px 40px 12px; display: flex; flex-direction: column; scrollbar-width: thin; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .streamspacer { flex: 1 1 auto; min-height: 0; }  /* push few msgs to bottom; collapses on overflow */
   .col { max-width: 760px; width: 100%; }
   .daydiv { display: flex; align-items: center; gap: 14px; margin: 6px 0 16px; color: var(--ghost); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; }
@@ -299,7 +313,7 @@
   .msg .msgimg-expired svg { width: 15px; height: 15px; flex: none; color: var(--ghost); }
 
   /* ============================================================ SIGNED-OUT + NOT-PRESENT (calm states) */
-  .gate { display: none; min-height: 100vh; align-items: center; justify-content: center; padding: 28px 22px; }
+  .gate { display: none; min-height: 100vh; min-height: 100dvh; align-items: center; justify-content: center; padding: 28px 22px; padding: max(28px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left)); }
   body.signedout .gate.signin { display: flex; }
   body.notpresent .gate.notpresent { display: flex; }
 
@@ -333,6 +347,9 @@
   .lander-sub { margin: 22px auto 0; font-size: 13px; line-height: 1.7; color: var(--faint); max-width: 44ch; }
   .gate .lander-sub { margin-top: 16px; }   /* beats `.gate p {margin:0}`; gives the indicator a touch of room above the paragraph */
   .lander-note { margin: 28px auto 0; font-family: var(--mono); font-size: 11px; line-height: 1.6; letter-spacing: 0.02em; color: var(--ghost); max-width: 40ch; }
+  .gate-source { display: inline-flex; align-items: center; gap: 7px; margin-top: 26px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--faint); text-decoration: none; transition: color 120ms ease; }
+  .gate-source:hover { color: var(--live); }
+  .gate-source svg { flex: none; opacity: 0.9; }
 
   .pulse { display: flex; width: fit-content; align-items: center; gap: 8px; margin: 63px auto 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--dim); }
   .pulse[hidden] { display: none; }   /* the class sets display:flex, which would otherwise defeat the hidden attribute */
@@ -491,8 +508,13 @@
        one track — otherwise it auto-places into a 0px column and collapses. */
     .body { grid-template-columns: 1fr; }
     aside { display: none; }
-    header { padding-left: 20px; padding-right: 20px; }
-    .stream, .compose { padding-left: 20px; padding-right: 20px; }
+    /* Respect the notch / home indicator: pad the fixed top bar and the composer
+       into the safe area so nothing hides under the status bar or gesture bar. */
+    header { padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); padding-top: max(16px, env(safe-area-inset-top)); }
+    .stream { padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
+    .compose { padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+    /* iOS auto-zooms when focusing an input smaller than 16px — keep it at 16. */
+    .compose input#say { font-size: 16px; }
     /* the header title is the only nav now — make the caret a touch bolder and
        drop the menu full width under the top bar */
     .roomswitch .rt .rt-caret { font-size: 15px; color: var(--text); }
@@ -634,6 +656,11 @@
       </div>
 
       <div class="lander-note">invite-only for now. you'll need a code from a builder who's already in.</div>
+
+      <a class="gate-source" href="https://github.com/devsmitt/Backchannel" target="_blank" rel="noopener noreferrer" title="read the source on GitHub">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>view source on github</span>
+      </a>
     </div>
   </div>
 
@@ -2413,16 +2440,25 @@
     recolorStream();
     renderRoster(lastRoster);
   }
+  // Keep the PWA / mobile status-bar color in step with the active theme.
+  function syncThemeColor() {
+    const meta = document.getElementById("themeColorMeta");
+    if (!meta) return;
+    const bg = getComputedStyle(document.body).backgroundColor;
+    if (bg) meta.setAttribute("content", bg);
+  }
   function setTheme(light) {
     document.documentElement.classList.toggle("theme-light", !!light);
     try { localStorage.setItem(THEME_KEY, light ? "light" : "dark"); } catch (_) {}
     renderThemeToggle();
+    syncThemeColor();
   }
 
   (() => {
     const btn = document.getElementById("themeToggle");
     if (btn) btn.addEventListener("click", () => setTheme(!isLight()));
     renderThemeToggle();
+    syncThemeColor();
     // swatches are rendered into the profile when it opens (renderSwatches there)
   })();
 

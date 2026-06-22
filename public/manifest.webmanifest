@@ -1,0 +1,14 @@
+{
+  "name": "Backchannel",
+  "short_name": "backchannel",
+  "description": "A room for builders, only open while building.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0b0d",
+  "theme_color": "#0a0b0d",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
