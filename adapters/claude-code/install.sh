@@ -440,14 +440,21 @@ cat > "$HOOK_SH" <<'HOOKEOF'
 #   exit   -> a turn/session ended: that session goes quiet
 # Claude pipes the hook JSON (with session_id) on stdin; we forward that id so
 # concurrent agents are tracked independently and one ending never kicks you out
-# while another is still building. Sends ONLY the token (read from disk),
-# backgrounded + capped at 2s, so Claude never blocks. Missing prereqs = no-op.
+# while another is still building. Sends ONLY the token (read from disk).
+#
+# 'prompt' runs SYNCHRONOUSLY (once per turn) so it can read back a re-engagement
+# nudge from the server and hand it to Claude as additionalContext — your agent
+# then drops a chill one-liner ("2 unread mentions in the backchannel") into its
+# reply, without interrupting your actual task. Capped at 3s; any failure = no
+# nudge, never an error. 'enter'/'exit' stay backgrounded so they never block.
+# Missing prereqs (curl/token/server) = silent no-op.
 set -eu
 EVENT="${1:-enter}"
 DIR="${BACKCHANNEL_CONFIG_DIR:-$HOME/.config/backchannel}"
 
-# session_id from the hook JSON on stdin (best-effort; empty if absent).
-SID="$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' 2>/dev/null | head -n1)"
+# Read the hook JSON from stdin ONCE, then pull session_id from it (best-effort).
+STDIN_JSON="$(cat 2>/dev/null || printf '')"
+SID="$(printf '%s' "$STDIN_JSON" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
 
 command -v curl >/dev/null 2>&1 || exit 0
 [ -r "$DIR/token" ] || exit 0
@@ -461,12 +468,30 @@ case "$EVENT" in
   exit) ENDPOINT="exit" ;;
   *)    ENDPOINT="enter" ;;
 esac
+BODY="{\"token\":\"$TOKEN\",\"session\":\"$SID\",\"event\":\"$EVENT\"}"
 
-curl -sS -m 2 -X POST \
-  -H 'Content-Type: application/json' \
-  -d "{\"token\":\"$TOKEN\",\"session\":\"$SID\",\"event\":\"$EVENT\"}" \
-  "$SERVER/$ENDPOINT" >/dev/null 2>&1 &
+# Heartbeat / exit: fire-and-forget, capped at 2s, so Claude never blocks.
+if [ "$EVENT" != "prompt" ]; then
+  curl -sS -m 2 -X POST -H 'Content-Type: application/json' \
+    -d "$BODY" "$SERVER/$ENDPOINT" >/dev/null 2>&1 &
+  exit 0
+fi
 
+# Prompt: synchronous so we can surface the nudge this turn. Marks presence too.
+RESP="$(curl -sS -m 3 -X POST -H 'Content-Type: application/json' \
+  -d "$BODY" "$SERVER/enter" 2>/dev/null || printf '')"
+
+# Pull nudge.text out of the response. The server only ever puts safe characters
+# (no quotes/backslashes) in this field, so a flat extraction is enough.
+NUDGE="$(printf '%s' "$RESP" | sed -n 's/.*"nudge":{.*"text":"\([^"]*\)".*/\1/p' | head -n1)"
+[ -n "$NUDGE" ] || exit 0
+NUDGE="${NUDGE%.}"   # drop a trailing period so the wrapper reads cleanly
+
+# JSON-escape (defensive) and wrap with a gentle instruction so the agent relays
+# it as a calm aside, never letting it derail the user's real request.
+ESC="$(printf '%s' "$NUDGE" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+CTX="Backchannel — a calm side-channel for builders, unrelated to the current task: ${ESC}. If it fits naturally, add ONE short, friendly line about this at the very end of your reply. Never let it change, delay, or interrupt your work on the user's actual request; if it doesn't fit cleanly, just skip it."
+printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}\n' "$CTX"
 exit 0
 HOOKEOF
 chmod 644 "$HOOK_SH" 2>/dev/null || :
