@@ -126,7 +126,8 @@ db.exec(`
     build_seconds  INTEGER DEFAULT 0,
     streak_days    INTEGER DEFAULT 0,
     last_build_day TEXT    DEFAULT '',
-    color          TEXT    DEFAULT ''
+    color          TEXT    DEFAULT '',
+    prefs          TEXT NOT NULL DEFAULT '{}'
   );
 
   -- One identity, many paired environments. Each machine/browser holds its OWN
@@ -277,6 +278,8 @@ function migrate() {
   addColumnIfMissing('users', 'color', "color TEXT DEFAULT ''");
   // admin: a banned user keeps their row (username stays claimed) but is locked out.
   addColumnIfMissing('users', 'banned', 'banned INTEGER NOT NULL DEFAULT 0');
+  // per-user preferences (JSON blob) — currently re-engagement nudge toggles.
+  addColumnIfMissing('users', 'prefs', "prefs TEXT NOT NULL DEFAULT '{}'");
 
   // messages: optional image attachment (a /uploads/<file> path).
   addColumnIfMissing('messages', 'image', 'image TEXT');
@@ -701,6 +704,39 @@ export function setTagline(userId, tagline) {
 export function setColor(userId, color) {
   const hex = /^#[0-9a-fA-F]{6}$/.test(String(color)) ? String(color).toLowerCase() : '';
   stmtSetColor.run(hex, userId);
+}
+
+// ---------------------------------------------------------------------------
+// Per-user preferences. A small JSON blob with known boolean keys; both default
+// ON so a fresh account gets the full experience. getPrefs always returns every
+// known key (missing/garbled storage falls back to the default).
+// ---------------------------------------------------------------------------
+const PREF_DEFAULTS = { mentionNudge: true, dailyGreeting: true };
+const stmtGetPrefs = db.prepare('SELECT prefs FROM users WHERE id = ?');
+const stmtSetPrefs = db.prepare('UPDATE users SET prefs = ? WHERE id = ?');
+
+/** Read a user's preferences, with every known key present and defaulted. */
+export function getPrefs(userId) {
+  const row = stmtGetPrefs.get(userId);
+  let stored = {};
+  if (row && row.prefs) { try { stored = JSON.parse(row.prefs) || {}; } catch { stored = {}; } }
+  const out = {};
+  for (const k of Object.keys(PREF_DEFAULTS)) {
+    out[k] = typeof stored[k] === 'boolean' ? stored[k] : PREF_DEFAULTS[k];
+  }
+  return out;
+}
+
+/** Merge a partial update (only known boolean keys) and persist. Returns the new prefs. */
+export function setPrefs(userId, partial) {
+  const cur = getPrefs(userId);
+  if (partial && typeof partial === 'object') {
+    for (const k of Object.keys(PREF_DEFAULTS)) {
+      if (typeof partial[k] === 'boolean') cur[k] = partial[k];
+    }
+  }
+  stmtSetPrefs.run(JSON.stringify(cur), userId);
+  return cur;
 }
 
 // ---------------------------------------------------------------------------

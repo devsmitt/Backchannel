@@ -437,6 +437,13 @@
 
   /* active environments */
   .env-sub { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-bottom: 12px; }
+  .prefs-sub { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-bottom: 14px; line-height: 1.5; }
+  .pref-row { display: flex; align-items: flex-start; gap: 11px; padding: 11px 0; border-top: 1px solid var(--line); cursor: pointer; }
+  .pref-row:first-of-type { border-top: none; }
+  .pref-row input { margin-top: 2px; accent-color: var(--accent); width: 15px; height: 15px; flex: none; cursor: pointer; }
+  .pref-row > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .pref-name { font-family: var(--mono); font-size: 13px; color: var(--text); }
+  .pref-desc { font-family: var(--mono); font-size: 11px; color: var(--faint); line-height: 1.45; }
   .env-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
   .env-row:first-of-type { border-top: none; }
   .env-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -1453,6 +1460,7 @@
         case "room_opened":  onRoomOpened(m.room, m.focus); break;
         case "dms":          onDms(m); break;
         case "devices":      renderDevices(m.devices || []); break;
+        case "prefs":        onPrefs(m.prefs); break;
         case "profile_data": onProfileData(m.user); break;
         case "denied":       break;  // sent while not present; ignore quietly
         case "error":        onAuthError(m.message); break;
@@ -1659,6 +1667,17 @@
         '<div class="invites-sub">bring in builders you trust. each code works once.</div>' +
         '<div id="invitesView"></div>' +
       '</div>';
+    const prefsSection =
+      '<div class="profile-section">' +
+        '<div class="label">nudges</div>' +
+        '<div class="prefs-sub">quiet pings your agent relays when you start building. it drops a single calm line into its reply, never interrupting your work.</div>' +
+        '<label class="pref-row"><input type="checkbox" id="prefMention" />' +
+          '<span><span class="pref-name">mention nudge</span><span class="pref-desc">a heads-up when someone @mentions you (at most once an hour).</span></span>' +
+        '</label>' +
+        '<label class="pref-row"><input type="checkbox" id="prefGreeting" />' +
+          '<span><span class="pref-name">daily greeting</span><span class="pref-desc">a hello on your first build each day, with who\'s around.</span></span>' +
+        '</label>' +
+      '</div>';
     const leaveSection =
       '<div class="profile-section leave-section">' +
         '<div class="label">leave backchannel</div>' +
@@ -1695,10 +1714,12 @@
         ? '<div class="profile-tabs">' +
             '<button class="ptab sel" id="ptabProfile" type="button">profile</button>' +
             '<button class="ptab" id="ptabInvites" type="button">invites</button>' +
+            '<button class="ptab" id="ptabPrefs" type="button">prefs</button>' +
             '<button class="ptab" id="ptabAccount" type="button">account</button>' +
           '</div>' +
           '<div id="panelProfile">' + colorSection + projectsSection + '</div>' +
           '<div id="panelInvites" hidden>' + inviteSection + '</div>' +
+          '<div id="panelPrefs" hidden>' + prefsSection + '</div>' +
           '<div id="panelAccount" hidden>' + envSection + leaveSection + '</div>'
         : projectsSection);
 
@@ -1706,6 +1727,7 @@
     bindProfileClose();
     renderProjects(u.projects || [], isYou);
     if (isYou) renderInvites(u.invites || []);
+    if (isYou) renderPrefs(u.prefs || {});
     if (isYou) renderSwatches();   // color picker lives in your profile now
 
     if (isYou) {
@@ -1713,6 +1735,7 @@
       const tabs = {
         profile: [document.getElementById("ptabProfile"), document.getElementById("panelProfile")],
         invites: [document.getElementById("ptabInvites"), document.getElementById("panelInvites")],
+        prefs: [document.getElementById("ptabPrefs"), document.getElementById("panelPrefs")],
         account: [document.getElementById("ptabAccount"), document.getElementById("panelAccount")],
       };
       let devicesLoaded = false;
@@ -1776,6 +1799,34 @@
       }
       wrap.appendChild(row);
     });
+  }
+
+  // Preferences toggles (own profile only). Both default ON when a key is absent,
+  // mirroring the server. Flipping a switch fires set_prefs immediately.
+  function renderPrefs(prefs) {
+    const m = document.getElementById("prefMention");
+    const g = document.getElementById("prefGreeting");
+    if (!m || !g) return;
+    m.checked = prefs.mentionNudge !== false;
+    g.checked = prefs.dailyGreeting !== false;
+    if (me) me.prefs = { mentionNudge: m.checked, dailyGreeting: g.checked };
+    const sync = () => {
+      const next = { mentionNudge: m.checked, dailyGreeting: g.checked };
+      if (me) me.prefs = next;
+      send({ type: "set_prefs", prefs: next });
+    };
+    m.addEventListener("change", sync);
+    g.addEventListener("change", sync);
+  }
+
+  // Server confirmation of a prefs change — keep local state + any open toggles in sync.
+  function onPrefs(prefs) {
+    if (!prefs) return;
+    if (me) me.prefs = prefs;
+    const m = document.getElementById("prefMention");
+    const g = document.getElementById("prefGreeting");
+    if (m) m.checked = prefs.mentionNudge !== false;
+    if (g) g.checked = prefs.dailyGreeting !== false;
   }
 
   function renderInvites(invites) {

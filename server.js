@@ -47,6 +47,8 @@ import {
   deleteUser,
   setTagline,
   setColor,
+  getPrefs,
+  setPrefs,
   recordEnter,
   recordExit,
   touchActive,
@@ -1279,7 +1281,7 @@ function meBlock(user) {
 // Attach a user's invite codes to their OWN profile payload (never to others' —
 // invites are private to the holder).
 function withInvites(data, userId) {
-  return data ? { ...data, invites: invitesForUser(userId) } : data;
+  return data ? { ...data, invites: invitesForUser(userId), prefs: getPrefs(userId) } : data;
 }
 
 // A user's private rooms split into visible (active) vs archived (hidden).
@@ -1391,11 +1393,13 @@ const lastMentionNudge = new Map();   // userId -> ts of last mention nudge
 const lastGreetDay = new Map();       // userId -> 'YYYY-MM-DD' (UTC) last greeted
 
 function computeNudge(user, now) {
+  const prefs = getPrefs(user.id);
+  if (!prefs.dailyGreeting && !prefs.mentionNudge) return null;
   let others = 0; for (const s of presence.values()) if (s && s.present) others++;
   others = Math.max(0, others - (isPresent(user.id) ? 1 : 0));
   const today = new Date(now).toISOString().slice(0, 10);
   // Daily greeting — first build of the day that actually has something to say.
-  if (lastGreetDay.get(user.id) !== today) {
+  if (prefs.dailyGreeting && lastGreetDay.get(user.id) !== today) {
     const mc = unseenMentionCount(user.id);
     if (others > 0 || mc > 0) {
       lastGreetDay.set(user.id, today);
@@ -1406,7 +1410,7 @@ function computeNudge(user, now) {
     }
   }
   // Mention heads-up — throttled, only while you have unread mentions.
-  if (now - (lastMentionNudge.get(user.id) || 0) > NUDGE_COOLDOWN_MS) {
+  if (prefs.mentionNudge && now - (lastMentionNudge.get(user.id) || 0) > NUDGE_COOLDOWN_MS) {
     const mc = unseenMentionCount(user.id);
     if (mc > 0) {
       lastMentionNudge.set(user.id, now);
@@ -1673,6 +1677,14 @@ wss.on('connection', (ws) => {
       const fresh = profileByName(ws.username);
       if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: withInvites(fresh, ws.userId) })); } catch {} }
       broadcastRoster();
+      return;
+    }
+
+    // --- set_prefs: toggle re-engagement nudges (mention nudge / daily greeting) ---
+    if (msg.type === 'set_prefs') {
+      if (!ws.userId) return;
+      const prefs = setPrefs(ws.userId, msg.prefs);   // only known boolean keys are applied
+      try { ws.send(JSON.stringify({ type: 'prefs', prefs })); } catch { /* closing */ }
       return;
     }
 
