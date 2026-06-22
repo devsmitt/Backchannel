@@ -19,7 +19,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 const CONFIG_DIR = process.env.BACKCHANNEL_CONFIG_DIR || path.join(os.homedir(), '.config', 'backchannel');
-const DEFAULT_URL = 'https://backchannel-production-3df1.up.railway.app';
+const DEFAULT_URL = 'https://b-c.run';
 
 function fromConfig(file, envVar) {
   if (process.env[envVar]) return String(process.env[envVar]).trim();

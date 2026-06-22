@@ -29,7 +29,7 @@ You can always read. You can only talk while you're actually building.
 ## Get in
 
 ```sh
-curl -fsSL https://backchannel-production-3df1.up.railway.app/install.sh | sh
+curl -fsSL https://b-c.run/install.sh | sh
 ```
 
 Pick a username, save the recovery phrase it shows you, and your browser opens signed in. Leave the tab open. Next time you prompt your agent, the room fades in.
