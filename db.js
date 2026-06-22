@@ -209,11 +209,27 @@ db.exec(`
     PRIMARY KEY (message_id, user_id, emoji)
   );
 
+  -- @mentions: one row per (mentioned user, message). Denormalized room/author/
+  -- excerpt so the re-engagement nudge + any future inbox survive message prune.
+  -- seen flips to 1 when the mentioned user reads that room.
+  CREATE TABLE IF NOT EXISTS mentions (
+    id         INTEGER PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    room_id    INTEGER NOT NULL,
+    room_slug  TEXT NOT NULL,
+    author     TEXT NOT NULL,
+    excerpt    TEXT NOT NULL,
+    created_at INTEGER,
+    seen       INTEGER NOT NULL DEFAULT 0
+  );
+
   CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id, id);
   CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_invites_owner ON invites(owner_id);
   CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
   CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);
+  CREATE INDEX IF NOT EXISTS idx_mentions_user ON mentions(user_id, seen);
 `);
 
 // One-time: seed device_tokens from the legacy single users.token_hash so existing
@@ -669,6 +685,7 @@ export function deleteUser(userId) {
     db.prepare('DELETE FROM room_reads WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM room_members WHERE user_id = ?').run(id);
     db.prepare('DELETE FROM device_tokens WHERE user_id = ?').run(id);      // their paired environments
+    db.prepare('DELETE FROM mentions WHERE user_id = ?').run(id);           // @mentions pointed at them
     db.prepare('DELETE FROM invites WHERE owner_id = ?').run(id);           // codes they held to share (used_by refs left intact: still spent)
     return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes;
   });
@@ -1194,6 +1211,34 @@ export function deleteMessage(messageId) {
     }
   }
   return { ok: true, roomId: m.room_id };
+}
+
+// ---------------------------------------------------------------------------
+// @mentions — persisted per mentioned user; powers the re-engagement nudge.
+// ---------------------------------------------------------------------------
+const stmtAddMention = db.prepare(
+  'INSERT INTO mentions (user_id, message_id, room_id, room_slug, author, excerpt, created_at, seen) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+);
+const stmtUnseenMentions = db.prepare('SELECT COUNT(*) AS c FROM mentions WHERE user_id = ? AND seen = 0');
+const stmtSeenMentionsInRoom = db.prepare('UPDATE mentions SET seen = 1 WHERE user_id = ? AND room_id = ? AND seen = 0');
+const stmtRecentUnseenMentions = db.prepare(
+  'SELECT author, room_slug, excerpt, created_at FROM mentions WHERE user_id = ? AND seen = 0 ORDER BY id DESC LIMIT ?'
+);
+
+export function addMention(userId, messageId, roomId, roomSlug, author, excerpt, now = Date.now()) {
+  stmtAddMention.run(userId, messageId, roomId, roomSlug, author, String(excerpt || '').slice(0, 140), now);
+}
+/** How many unread @mentions this user has. */
+export function unseenMentionCount(userId) {
+  return stmtUnseenMentions.get(userId).c;
+}
+/** Reading a room clears its mentions for that user. Returns rows affected. */
+export function markMentionsSeenInRoom(userId, roomId) {
+  return stmtSeenMentionsInRoom.run(userId, roomId).changes;
+}
+/** Latest unread mentions (for the nudge / a future inbox). */
+export function recentUnseenMentions(userId, limit = 5) {
+  return stmtRecentUnseenMentions.all(userId, limit);
 }
 
 export default db;

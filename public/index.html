@@ -216,6 +216,9 @@
   .msg .text { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
   .msg .text a { color: var(--live); text-decoration: none; }
   .msg .text a:hover { text-decoration: underline; }
+  .msg .text .mention { color: var(--live); cursor: pointer; }
+  .msg .text .mention:hover { text-decoration: underline; }
+  .msg .text .mention.me { background: color-mix(in srgb, var(--live) 20%, transparent); color: var(--live); border-radius: 4px; padding: 0.5px 4px; font-weight: 600; }
   .msg .text code { font-family: var(--mono); font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0.5px 5px; }
   .msg .text pre.code { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 6px 0 4px; overflow-x: auto; white-space: pre; scrollbar-width: thin; }
   .msg .text pre.code code { background: none; border: none; padding: 0; font-size: 12.5px; }
@@ -800,6 +803,12 @@
       if (t) { trail = t[0]; u = u.slice(0, -trail.length); }
       return '<a href="' + u + '" target="_blank" rel="noopener noreferrer nofollow">' + u + "</a>" + trail;
     });
+    // @mentions: highlight + click-to-profile. Stronger highlight when it's YOU.
+    // (Code/links are already stashed as placeholders, so @ inside them is safe.)
+    s = s.replace(/(^|[^\w@/])@([a-z0-9_-]{2,24})/gi, function (_, pre, name) {
+      var meHit = username && name.toLowerCase() === username.toLowerCase();
+      return pre + '<span class="mention' + (meHit ? " me" : "") + '" data-u="' + name.toLowerCase() + '">@' + name + "</span>";
+    });
     return s.replace(new RegExp(SENT + "(\\d+)" + SENT, "g"), function (_, i) { return stash[Number(i)]; });
   }
 
@@ -1193,6 +1202,11 @@
   // Scrolling the stream detaches the (fixed) picker from its anchor — close it.
   if (streamEl) streamEl.addEventListener("scroll", () => closeReactionPicker(), { passive: true });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeRoomMenu(); closePeopleMenu(); closeReactionPicker(); closeGifDialog(); } });
+  // Click an @mention in any message to open that builder's profile.
+  if (streamColEl) streamColEl.addEventListener("click", (e) => {
+    const mEl = e.target.closest && e.target.closest(".mention");
+    if (mEl && mEl.dataset.u) openProfile(mEl.dataset.u);
+  });
 
   // ---- Rendering messages -------------------------------------------------
   function clearStream() { streamColEl.innerHTML = ""; lastSender = null; }

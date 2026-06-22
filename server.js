@@ -67,6 +67,10 @@ import {
   toggleReaction,
   reactionsForMessage,
   reactionsForMessages,
+  addMention,
+  unseenMentionCount,
+  markMentionsSeenInRoom,
+  recentUnseenMentions,
   messageById,
   setBanned,
   adminListUsers,
@@ -1347,9 +1351,30 @@ function broadcastMessage(room, senderUserId, payload) {
     try {
       ws.send(JSON.stringify({ ...payload, self: ws.userId === senderUserId }));
       // Only a socket actively viewing the room has "read" the line — advance its
-      // cursor so a later reload doesn't resurface it as unread.
-      if (ws.room === room.slug && payload.id) markRead(ws.userId, room.id, payload.id);
+      // cursor (and clear any mentions there) so a reload/nudge doesn't resurface it.
+      if (ws.room === room.slug && payload.id) {
+        markRead(ws.userId, room.id, payload.id);
+        markMentionsSeenInRoom(ws.userId, room.id);
+      }
     } catch { /* a peer dying mid-broadcast must not abort the rest */ }
+  }
+}
+
+// Parse @mentions out of a message and persist one per real, eligible user
+// (channels: anyone; dm/group: members only; never the author). Powers the nudge.
+const MENTION_RE = /@([a-z0-9_-]{2,24})/gi;
+function storeMentions(room, message, authorName, body) {
+  const seen = new Set();
+  let m;
+  MENTION_RE.lastIndex = 0;
+  while ((m = MENTION_RE.exec(body)) !== null) {
+    const name = m[1].toLowerCase();
+    if (seen.has(name) || name === authorName) continue;
+    seen.add(name);
+    const u = userByName(name);
+    if (!u) continue;
+    if (room.type !== 'channel' && !isMember(room.id, u.id)) continue;
+    try { addMention(u.id, message.id, room.id, room.slug, authorName, body, message.created_at); } catch { /* ignore */ }
   }
 }
 
@@ -1469,6 +1494,7 @@ wss.on('connection', (ws) => {
           archived: priv.archived,
           present: isPresent(user.id),
           unread: unreadCountsForUser(user.id),
+          mentions: unseenMentionCount(user.id),
         }));
       } catch { /* harmless */ }
 
@@ -1490,8 +1516,9 @@ wss.on('connection', (ws) => {
       ws.room = room.slug;
       sendHistory(ws, room);
       // Entering a room catches you up: advance the read cursor to the newest
-      // message so the unread badge clears and stays cleared across reloads.
+      // message and clear any @mentions waiting in that room.
       try { markRead(ws.userId, room.id, latestMessageId(room.id)); } catch (e) { console.error('[backchannel] markRead join:', e); }
+      try { markMentionsSeenInRoom(ws.userId, room.id); } catch (e) { console.error('[backchannel] mentions seen:', e); }
       return;
     }
 
@@ -1522,6 +1549,7 @@ wss.on('connection', (ws) => {
       if (!body && !image && !gif) return;
 
       const { id, created_at } = insertMessage(room.id, ws.userId, ws.username, body, image, gif);
+      if (body) storeMentions(room, { id, created_at }, ws.username, body);   // before broadcast so active viewers get marked seen
       broadcastMessage(room, ws.userId, {
         type: 'msg', room: room.slug, id, username: ws.username, body, image, gif, ts: created_at,
       });
