@@ -793,7 +793,8 @@ cat > "$SHELL_SNIPPET" <<'SHELLEOF'
 #
 # CONFIG (env vars, set before sourcing):
 #   BACKCHANNEL_AGENTS        space-separated programs that gate presence.
-#                             Default: "codex aider gemini llm goose opencode".
+#                             Default: "codex aider gemini llm goose opencode
+#                             hermes openclaw".
 #                             DELIBERATELY excludes "claude" (native hooks).
 #   BACKCHANNEL_WATCH_ALL     "1" to also gate ANY command running longer than
 #                             BACKCHANNEL_WATCH_SECONDS. Default: off.
@@ -809,7 +810,7 @@ esac
 
 # --- Configuration ----------------------------------------------------------
 : "${BACKCHANNEL_CONFIG_DIR:=$HOME/.config/backchannel}"
-: "${BACKCHANNEL_AGENTS:=codex aider gemini llm goose opencode}"
+: "${BACKCHANNEL_AGENTS:=codex aider gemini llm goose opencode hermes openclaw}"
 : "${BACKCHANNEL_WATCH_ALL:=0}"
 : "${BACKCHANNEL_WATCH_SECONDS:=30}"
 

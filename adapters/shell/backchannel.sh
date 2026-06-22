@@ -26,7 +26,8 @@
 #
 # CONFIG (env vars — set BEFORE sourcing, or in your rc above the source line)
 #   BACKCHANNEL_AGENTS        space-separated program names that gate presence.
-#                             Default: "codex aider gemini llm goose opencode".
+#                             Default: "codex aider gemini llm goose opencode
+#                             hermes openclaw".
 #                             DELIBERATELY excludes "claude" (it has native hooks).
 #   BACKCHANNEL_WATCH_ALL     "1" to also gate on ANY command that runs longer
 #                             than BACKCHANNEL_WATCH_SECONDS (pure-terminal
@@ -44,7 +45,7 @@ esac
 
 # --- Configuration ----------------------------------------------------------
 : "${BACKCHANNEL_CONFIG_DIR:=$HOME/.config/backchannel}"
-: "${BACKCHANNEL_AGENTS:=codex aider gemini llm goose opencode}"
+: "${BACKCHANNEL_AGENTS:=codex aider gemini llm goose opencode hermes openclaw}"
 : "${BACKCHANNEL_WATCH_ALL:=0}"
 : "${BACKCHANNEL_WATCH_SECONDS:=30}"
 
