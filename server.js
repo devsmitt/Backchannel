@@ -65,6 +65,7 @@ import {
   insertMessage,
   recentMessages,
   pruneOldMessages,
+  expireDmImages,
   latestMessageId,
   toggleReaction,
   reactionsForMessage,
@@ -105,6 +106,7 @@ const PORT = process.env.PORT || 8080;
 
 const BUILDING_WINDOW_MS = Number(process.env.BUILDING_WINDOW) || 30 * 60 * 1000;   // active→offline floor for "building"
 const RETENTION_MS = Number(process.env.RETENTION_MS) || 6 * 60 * 60 * 1000;        // prune messages older than this
+const DM_IMAGE_TTL_MS = Number(process.env.DM_IMAGE_TTL_MS) || 24 * 60 * 60 * 1000; // expire DM/group image files after this
 const SWEEP_MS = Number(process.env.SWEEP_MS) || 60 * 1000;                         // presence + retention sweep
 // Inactivity timeout: how long with NO /enter signal (UserPromptSubmit OR the
 // PreToolUse heartbeat) before we assume the turn ended abnormally (interrupt,
@@ -1828,6 +1830,8 @@ const sweep = setInterval(() => {
     pruneOldMessages(RETENTION_MS);
   } catch (e) { console.error('[backchannel] prune:', e); }
 
+  try { expireDmImages(DM_IMAGE_TTL_MS); } catch (e) { console.error('[backchannel] dm image expiry:', e); }
+
   try { sweepPairings(); } catch (e) { console.error('[backchannel] pair sweep:', e); }
 
   // Evict idle rate-limit buckets so the limiter Maps can't grow unbounded.
@@ -1847,6 +1851,7 @@ wss.on('close', () => clearInterval(sweep));
 
 // Prune once at startup too (retention is enforced at boot + on the sweep).
 try { pruneOldMessages(RETENTION_MS); } catch (e) { console.error('[backchannel] startup prune:', e); }
+try { expireDmImages(DM_IMAGE_TTL_MS); } catch (e) { console.error('[backchannel] startup dm image expiry:', e); }
 
 // ---------------------------------------------------------------------------
 // Resilience: a single bad request or socket must never take the process down.

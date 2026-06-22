@@ -35,6 +35,13 @@ try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (e) { /* exists / w
 // Retention window for message pruning (mirrors server env; read here too so the
 // prune helper is self-contained). Default 6h.
 const RETENTION_MS = Number(process.env.RETENTION_MS) || 6 * 60 * 60 * 1000;
+// DMs/groups are never pruned, but their uploaded images would otherwise live on
+// the volume forever. We expire the FILE after this window and leave a placeholder
+// in its place (the message text stays). Default 24h.
+const DM_IMAGE_TTL_MS = Number(process.env.DM_IMAGE_TTL_MS) || 24 * 60 * 60 * 1000;
+// Sentinel written into messages.image once the backing file is expired/unlinked,
+// so the client can tell "image expired" apart from "never had an image" (NULL).
+const IMAGE_EXPIRED = 'expired';
 
 // How many invite codes each user gets (new signups + the one-time seed of
 // existing users). Slow, organic growth: invite-only, a few per person.
@@ -439,6 +446,22 @@ const stmtPrunableImages = db.prepare(
      WHERE created_at < ?
        AND image IS NOT NULL
        AND room_id IN (SELECT id FROM rooms WHERE type = 'channel')`
+);
+// DM/group images past their TTL: the files to unlink, then the rows to mark.
+// We never re-touch already-expired rows (image = the sentinel).
+const stmtExpirableDmImages = db.prepare(
+  `SELECT image FROM messages
+     WHERE created_at < ?
+       AND image IS NOT NULL
+       AND image != ?
+       AND room_id IN (SELECT id FROM rooms WHERE type IN ('dm','group'))`
+);
+const stmtExpireDmImages = db.prepare(
+  `UPDATE messages SET image = ?
+     WHERE created_at < ?
+       AND image IS NOT NULL
+       AND image != ?
+       AND room_id IN (SELECT id FROM rooms WHERE type IN ('dm','group'))`
 );
 
 const stmtListChannels = db.prepare(
@@ -1039,6 +1062,27 @@ export function pruneOldMessages(retentionMs = RETENTION_MS, now = Date.now()) {
   try { stmtPruneOrphanReactions.run(); } catch (e) { /* never block pruning */ }
   for (const url of images) {
     // url is '/uploads/<file>' — resolve to a basename inside UPLOAD_DIR only.
+    const file = path.basename(String(url));
+    if (!file || file === '.' || file === '..') continue;
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, file)); } catch (e) { /* already gone / shared */ }
+  }
+  return changes;
+}
+
+/**
+ * Expire DM/group image FILES older than the TTL while keeping the message row:
+ * unlink the backing file and replace messages.image with the IMAGE_EXPIRED
+ * sentinel, so the client shows a graceful placeholder instead of a dead link.
+ * Channel images are handled by pruneOldMessages (whole row goes). Returns rows marked.
+ */
+export function expireDmImages(ttlMs = DM_IMAGE_TTL_MS, now = Date.now()) {
+  const cutoff = now - ttlMs;
+  // Collect files first (before the rows lose their paths), then mark, then unlink.
+  let images = [];
+  try { images = stmtExpirableDmImages.all(cutoff, IMAGE_EXPIRED).map((r) => r.image).filter(Boolean); }
+  catch (e) { /* never let file cleanup block the row update */ }
+  const changes = stmtExpireDmImages.run(IMAGE_EXPIRED, cutoff, IMAGE_EXPIRED).changes;
+  for (const url of images) {
     const file = path.basename(String(url));
     if (!file || file === '.' || file === '..') continue;
     try { fs.unlinkSync(path.join(UPLOAD_DIR, file)); } catch (e) { /* already gone / shared */ }

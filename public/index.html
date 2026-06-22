@@ -295,6 +295,8 @@
   /* image attachments in the stream */
   .msg .msgimg { display: block; margin: 6px 0 2px; max-width: min(420px, 100%); max-height: 360px; width: auto; height: auto; border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; background: var(--rail); }
   .msg .msgimg:hover { border-color: var(--ghost); }
+  .msg .msgimg-expired { display: inline-flex; align-items: center; gap: 8px; margin: 6px 0 2px; padding: 12px 16px; border: 1px dashed var(--line); border-radius: 8px; background: var(--rail); color: var(--faint); font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; }
+  .msg .msgimg-expired svg { width: 15px; height: 15px; flex: none; color: var(--ghost); }
 
   /* ============================================================ SIGNED-OUT + NOT-PRESENT (calm states) */
   .gate { display: none; min-height: 100vh; align-items: center; justify-content: center; padding: 28px 22px; }
@@ -1241,9 +1243,19 @@
       textEl.innerHTML = formatBody(m.body);  // formatBody escapes first, then adds only safe code/link tags
       row.appendChild(textEl);
     }
+    // Expired DM/group image: the file aged out (24h) but the message stays. Show
+    // a graceful placeholder in place of the picture.
+    if (m.image === "expired") {
+      const ph = document.createElement("div");
+      ph.className = "msgimg-expired";
+      ph.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>' +
+        '<span>image expired</span>';
+      row.appendChild(ph);
+    }
     // Image attachment: render ONLY a path we recognize as our own upload, so a
     // crafted message can never point an <img> at an arbitrary/tracking URL.
-    if (m.image && /^\/uploads\/[A-Za-z0-9_-]+\.(png|jpg|jpeg|gif|webp)$/.test(m.image)) {
+    else if (m.image && /^\/uploads\/[A-Za-z0-9_-]+\.(png|jpg|jpeg|gif|webp)$/.test(m.image)) {
       const a = document.createElement("a");
       a.href = m.image; a.target = "_blank"; a.rel = "noopener noreferrer";
       const img = document.createElement("img");
