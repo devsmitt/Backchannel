@@ -146,7 +146,8 @@ db.exec(`
     token_hash TEXT UNIQUE NOT NULL,
     label      TEXT DEFAULT '',
     created_at INTEGER,
-    last_seen  INTEGER
+    last_seen  INTEGER,
+    agent      INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS rooms (
@@ -294,6 +295,10 @@ function migrate() {
   addColumnIfMissing('users', 'banned', 'banned INTEGER NOT NULL DEFAULT 0');
   // per-user preferences (JSON blob) — currently re-engagement nudge toggles.
   addColumnIfMissing('users', 'prefs', "prefs TEXT NOT NULL DEFAULT '{}'");
+  // device_tokens.agent: 1 = a "build" environment (runs the agent hooks / drives
+  // presence), 0 = a "view-only" environment. Declared at pair time + backfilled
+  // the first time the environment fires /enter.
+  addColumnIfMissing('device_tokens', 'agent', 'agent INTEGER NOT NULL DEFAULT 0');
 
   // messages: optional image attachment (a /uploads/<file> path).
   addColumnIfMissing('messages', 'image', 'image TEXT');
@@ -383,12 +388,14 @@ const stmtUserByTokenHash = db.prepare(
   'SELECT u.* FROM users u JOIN device_tokens d ON d.user_id = u.id WHERE d.token_hash = ?'
 );
 const stmtInsertDevice = db.prepare(
-  'INSERT INTO device_tokens (user_id, token_hash, label, created_at, last_seen) VALUES (?, ?, ?, ?, ?)'
+  'INSERT INTO device_tokens (user_id, token_hash, label, created_at, last_seen, agent) VALUES (?, ?, ?, ?, ?, ?)'
 );
 const stmtDeviceByHash = db.prepare('SELECT * FROM device_tokens WHERE token_hash = ?');
 const stmtDevicesForUser = db.prepare(
-  'SELECT id, label, created_at, last_seen FROM device_tokens WHERE user_id = ? ORDER BY created_at ASC, id ASC'
+  'SELECT id, label, created_at, last_seen, agent FROM device_tokens WHERE user_id = ? ORDER BY created_at ASC, id ASC'
 );
+// Flip a token's environment to "build" (drives presence). Returns true on change.
+const stmtMarkDeviceAgent = db.prepare('UPDATE device_tokens SET agent = 1 WHERE token_hash = ? AND agent = 0');
 const stmtRemoveDevice = db.prepare('DELETE FROM device_tokens WHERE id = ? AND user_id = ?');
 const stmtRemoveDeviceByHash = db.prepare('DELETE FROM device_tokens WHERE token_hash = ?');
 const stmtRevokeAllDevices = db.prepare('DELETE FROM device_tokens WHERE user_id = ?');
@@ -608,8 +615,9 @@ export function claimWithInvite(username, tokenHash, recoveryHash, code, label =
       return { ok: false, error: 'taken' };   // username or token_hash UNIQUE
     }
     const userId = info.lastInsertRowid;
-    // the claiming machine becomes the first paired environment
-    addDeviceToken(userId, tokenHash, label, now);
+    // the claiming machine becomes the first paired environment — and since /claim
+    // only happens through the installer (which wires hooks), it's a build environment.
+    addDeviceToken(userId, tokenHash, label, now, true);
     db.prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE code = ?').run(userId, now, code);
     const invites = mintInvitesInner(userId, INVITE_GRANT);
     return { ok: true, id: userId, username, invites };
@@ -647,10 +655,16 @@ export function userByTokenHash(tokenHash) {
 // Device tokens — one per paired environment (machine/browser).
 // ---------------------------------------------------------------------------
 
-/** Pair a new environment: add a token for this user. Returns the device id. */
-export function addDeviceToken(userId, tokenHash, label = '', now = Date.now()) {
-  const info = stmtInsertDevice.run(userId, tokenHash, String(label || '').slice(0, 40), now, now);
+/** Pair a new environment: add a token for this user. `agent` true = a build
+ *  environment (hooks installed); false/absent = view-only. Returns the device id. */
+export function addDeviceToken(userId, tokenHash, label = '', now = Date.now(), agent = false) {
+  const info = stmtInsertDevice.run(userId, tokenHash, String(label || '').slice(0, 40), now, now, agent ? 1 : 0);
   return info.lastInsertRowid;
+}
+
+/** Mark a token's environment as a build environment (it drives presence). */
+export function markDeviceAgent(tokenHash) {
+  try { return stmtMarkDeviceAgent.run(tokenHash).changes > 0; } catch { return false; }
 }
 
 /** The device row for a token hash (to mark "current" + stamp last_seen). */

@@ -206,7 +206,7 @@ move_existing() {
         [ -n "$_mu" ] || { say "  username required — try again."; continue; }
         TOKEN="$(gen_token)"
         _ju="$(json_escape "$_mu")"; _jr="$(json_escape "$_in")"; _jt="$(json_escape "$TOKEN")"; _jl="$(json_escape "$DEVICE_LABEL")"
-        _out="$(post_json "$SERVER/recover" "{\"username\":\"$_ju\",\"recovery\":\"$_jr\",\"newToken\":\"$_jt\",\"label\":\"$_jl\"}")"
+        _out="$(post_json "$SERVER/recover" "{\"username\":\"$_ju\",\"recovery\":\"$_jr\",\"newToken\":\"$_jt\",\"label\":\"$_jl\",\"agent\":true}")"
         last_code
         case "$HTTP_CODE" in
           200) RECOVERY="$_in"; USERNAME="$_mu"; MOVED="yes"; say "  recovered: $_mu (other environments signed out)"; return 0 ;;
@@ -219,7 +219,7 @@ move_existing() {
       *)
         # No whitespace -> a pairing code (additive).
         _jc="$(json_escape "$_in")"; _jl="$(json_escape "$DEVICE_LABEL")"
-        _out="$(post_json "$SERVER/pair/redeem" "{\"code\":\"$_jc\",\"label\":\"$_jl\"}")"
+        _out="$(post_json "$SERVER/pair/redeem" "{\"code\":\"$_jc\",\"label\":\"$_jl\",\"agent\":true}")"
         last_code
         if [ "$HTTP_CODE" = "200" ]; then
           TOKEN="$(printf '%s' "$_out" | json_field token)"

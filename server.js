@@ -39,6 +39,7 @@ import {
   userByName,
   userById,
   addDeviceToken,
+  markDeviceAgent,
   deviceByTokenHash,
   listDevices,
   removeDevice,
@@ -962,7 +963,9 @@ const server = http.createServer(async (req, res) => {
     if (user.banned) { sendJson(res, 403, { error: 'banned' }); return; }   // banned: phrase can't recover back in
     try {
       revokeAllDevices(user.id);                                                  // wipe every environment
-      addDeviceToken(user.id, sha256(newToken), deviceLabel(req, body && body.label)); // and pair this one fresh
+      // agent flag: the installer recovers into a build environment; the in-app
+      // (browser) recover is view-only. Caller declares it via body.agent.
+      addDeviceToken(user.id, sha256(newToken), deviceLabel(req, body && body.label), Date.now(), !!(body && body.agent)); // and pair this one fresh
       sendJson(res, 200, { ok: true });
     } catch (e) {
       console.error('[backchannel] recover:', e);
@@ -1088,7 +1091,9 @@ const server = http.createServer(async (req, res) => {
     while (attempts++ < 5) {
       const next = crypto.randomBytes(32).toString('hex');
       try {
-        addDeviceToken(rec.userId, sha256(next), deviceLabel(req, body && body.label));
+        // agent flag: the installer redeems into a build environment (it wires
+        // hooks); redeeming in the browser is view-only. Declared via body.agent.
+        addDeviceToken(rec.userId, sha256(next), deviceLabel(req, body && body.label), Date.now(), !!(body && body.agent));
         sendJson(res, 200, { token: next });
         return;
       } catch { /* token-hash collision — retry */ }
@@ -1121,7 +1126,12 @@ const server = http.createServer(async (req, res) => {
       let nudge = null;
       if (user) { try { nudge = computeNudge(user, Date.now()); } catch { nudge = null; } }
       sendJson(res, 200, nudge ? { ok: true, nudge } : { ok: true });
-      if (user) setImmediate(() => enterUser(user.id, session, event));
+      if (user) setImmediate(() => {
+        // This environment is firing presence -> it's a build environment. Backfill
+        // the flag (covers envs paired before this existed / without the install hint).
+        try { markDeviceAgent(tokenHash); } catch { /* non-critical */ }
+        enterUser(user.id, session, event);
+      });
       return;
     }
     sendJson(res, 200, { ok: true });
@@ -1647,7 +1657,7 @@ wss.on('connection', (ws) => {
       if (!ws.userId) return;
       const devices = listDevices(ws.userId).map((d) => ({
         id: d.id, label: d.label || '', createdAt: d.created_at, lastSeen: d.last_seen,
-        current: d.id === ws.deviceId,
+        current: d.id === ws.deviceId, agent: !!d.agent,
       }));
       try { ws.send(JSON.stringify({ type: 'devices', devices })); } catch {}
       return;
@@ -1660,7 +1670,7 @@ wss.on('connection', (ws) => {
       if (id && id !== ws.deviceId) removeDevice(ws.userId, id);   // can't revoke yourself here
       const devices = listDevices(ws.userId).map((d) => ({
         id: d.id, label: d.label || '', createdAt: d.created_at, lastSeen: d.last_seen,
-        current: d.id === ws.deviceId,
+        current: d.id === ws.deviceId, agent: !!d.agent,
       }));
       try { ws.send(JSON.stringify({ type: 'devices', devices })); } catch {}
       return;

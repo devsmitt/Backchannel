@@ -458,6 +458,11 @@
   .linkcode .lc-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
   .linkcode .lc-code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.22em; color: var(--live); margin: 8px 0 6px; user-select: all; }
   .linkcode .lc-exp { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+  .linkcode .lc-ways { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--dim); }
+  .linkcode .lc-kind { display: inline-block; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; margin-right: 6px; }
+  .linkcode .lc-kind.build { color: var(--live); border-color: color-mix(in srgb, var(--live) 36%, transparent); }
+  .recoverfields .recover-warn { font-family: var(--mono); font-size: 11px; line-height: 1.55; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .recoverfields .recover-warn b { color: var(--danger); font-weight: 600; }
 
   /* profile tabs (own profile) */
   .profile-tabs { display: flex; gap: 4px; padding: 0 28px; margin-top: 4px; border-bottom: 1px solid var(--line); }
@@ -479,6 +484,9 @@
   .env-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .env-label { font-size: 13.5px; color: var(--text); }
   .env-current { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; color: var(--live); margin-left: 6px; }
+  /* environment type chip: build (drives presence) vs view-only (a window) */
+  .env-kind { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; vertical-align: middle; }
+  .env-kind.build { color: var(--live); border-color: color-mix(in srgb, var(--live) 36%, transparent); }
   .env-meta { font-family: var(--mono); font-size: 11px; color: var(--faint); }
   .env-remove { margin-left: auto; flex: 0 0 auto; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; color: var(--danger); background: none; border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
   .env-remove:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
@@ -648,7 +656,7 @@
           </div>
           <button class="reveal recover-link" id="recoverBtn" type="button">lost every device? recover &rarr;</button>
           <div class="recoverfields" id="recoverFields" hidden>
-            <div class="sub"><b>Destructive.</b> Your username + the 6 words you saved. This signs out every other environment and starts fresh here.</div>
+            <div class="recover-warn"><b>The nuclear option — read this.</b> Recovering signs out <b>every</b> other environment: your phone, every browser, and every build machine. Your agent stops marking you present until you re-install on each one. Only do this if you've truly lost access everywhere. Just adding this device? Use a pairing code above instead.</div>
             <input class="field authfield" id="recUser" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="username" />
             <div class="phrasegrid" id="phraseGrid">
               <input class="field phraseword" data-i="0" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="1" />
@@ -1706,7 +1714,7 @@
     const envSection =
       '<div class="profile-section">' +
         '<div class="label">active environments</div>' +
-        '<div class="env-sub">every machine & browser signed in to your account. each stays active on its own; revoke any one to sign it out.</div>' +
+        '<div class="env-sub"><b>build</b> environments run your agent and mark you present; <b>view-only</b> ones (your phone, an extra browser) just watch. revoke any one to sign it out.</div>' +
         '<div id="devicesView"></div>' +
         '<span class="edit-link" id="pairDevice">+ pair a device</span>' +
         '<div class="linkcode" id="linkCodeOut" hidden></div>' +
@@ -1832,18 +1840,25 @@
       row.className = "env-row";
       const added = d.createdAt ? new Date(d.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
       const label = d.label === "cli" ? "terminal" : (d.label === "browser" ? "browser" : (d.label || "environment"));
+      // build = runs your agent hooks (drives presence); view-only = a window.
+      const kind = d.agent
+        ? '<span class="env-kind build" title="runs your agent — marks you present">build</span>'
+        : '<span class="env-kind" title="a read-only window">view-only</span>';
       row.innerHTML =
         '<div class="env-info">' +
-          '<span class="env-label">' + esc(label) + (d.current ? ' <span class="env-current">this one</span>' : '') + '</span>' +
+          '<span class="env-label">' + esc(label) + ' ' + kind + (d.current ? ' <span class="env-current">this one</span>' : '') + '</span>' +
           '<span class="env-meta">paired ' + esc(added) + '</span>' +
         '</div>';
       if (!d.current) {
         const btn = document.createElement("button");
         btn.className = "env-remove"; btn.type = "button"; btn.textContent = "revoke";
         btn.addEventListener("click", () => {
-          if (window.confirm("Revoke this environment? It will be signed out immediately. This can't be undone.")) {
-            send({ type: "remove_device", id: d.id });
-          }
+          // A build environment is load-bearing for presence — warn hard before
+          // revoking it (this is the footgun that strands your agent).
+          const msg = d.agent
+            ? "Revoke this BUILD environment?\n\nYour agent runs here — this is what marks you present. Revoking it means you'll stay dark until you re-pair this machine (re-run the installer). It signs out immediately and can't be undone."
+            : "Revoke this view-only environment? It signs out immediately and can't be undone.";
+          if (window.confirm(msg)) send({ type: "remove_device", id: d.id });
         });
         row.appendChild(btn);
       }
@@ -2018,9 +2033,13 @@
             if (d && d.code) {
               linkOut.hidden = false;
               linkOut.innerHTML =
-                '<div class="lc-label">on the other device → “pair this device” → enter:</div>' +
+                '<div class="lc-label">your pairing code</div>' +
                 '<div class="lc-code">' + esc(d.code) + '</div>' +
-                '<div class="lc-exp">expires in 5 minutes · single use · adds the device</div>';
+                '<div class="lc-exp">single use · expires in 5 min · use it ONE way:</div>' +
+                '<div class="lc-ways">' +
+                  '<div><span class="lc-kind">view-only</span> phone / another browser: open ' + esc(location.host) + ' → “already have an account” → paste it.</div>' +
+                  '<div><span class="lc-kind build">build</span> a machine your agent runs on: run the install command there, choose “add”, paste it — wires the hooks.</div>' +
+                '</div>';
             } else {
               linkOut.hidden = false;
               linkOut.innerHTML = '<div class="lc-exp">couldn’t create a code — try again</div>';
