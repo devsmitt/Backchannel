@@ -1105,11 +1105,13 @@ const server = http.createServer(async (req, res) => {
       const tokenHash = sha256(token);
       if (!limitPresence.allow(tokenHash)) { sendJson(res, 429, { error: 'rate limited' }); return; }
       const event = body && typeof body.event === 'string' ? body.event : '';
-      sendJson(res, 200, { ok: true });
-      setImmediate(() => {
-        const user = userByTokenHash(tokenHash);
-        if (user) enterUser(user.id, session, event);
-      });
+      // Resolve the user up front so we can hand back a (throttled) re-engagement
+      // nudge. Unknown tokens still get a bare {ok:true} — no existence leak.
+      const user = userByTokenHash(tokenHash);
+      let nudge = null;
+      if (user) { try { nudge = computeNudge(user, Date.now()); } catch { nudge = null; } }
+      sendJson(res, 200, nudge ? { ok: true, nudge } : { ok: true });
+      if (user) setImmediate(() => enterUser(user.id, session, event));
       return;
     }
     sendJson(res, 200, { ok: true });
@@ -1376,6 +1378,45 @@ function storeMentions(room, message, authorName, body) {
     if (room.type !== 'channel' && !isMember(room.id, u.id)) continue;
     try { addMention(u.id, message.id, room.id, room.slug, authorName, body, message.created_at); } catch { /* ignore */ }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Re-engagement nudge: a tiny line /enter can hand back to the hook on a prompt.
+// Mechanism-agnostic (just {kind, text}); the hook decides how to surface it.
+// Throttled hard so it whispers, never nags: a once-per-UTC-day greeting, and a
+// mention heads-up at most once an hour while you have unread mentions.
+// ---------------------------------------------------------------------------
+const NUDGE_COOLDOWN_MS = 60 * 60 * 1000;
+const lastMentionNudge = new Map();   // userId -> ts of last mention nudge
+const lastGreetDay = new Map();       // userId -> 'YYYY-MM-DD' (UTC) last greeted
+
+function computeNudge(user, now) {
+  let others = 0; for (const s of presence.values()) if (s && s.present) others++;
+  others = Math.max(0, others - (isPresent(user.id) ? 1 : 0));
+  const today = new Date(now).toISOString().slice(0, 10);
+  // Daily greeting — first build of the day that actually has something to say.
+  if (lastGreetDay.get(user.id) !== today) {
+    const mc = unseenMentionCount(user.id);
+    if (others > 0 || mc > 0) {
+      lastGreetDay.set(user.id, today);
+      let t = 'welcome back.';
+      if (others > 0) t += ` ${others} builder${others === 1 ? '' : 's'} in the backchannel.`;
+      if (mc > 0) t += ` ${mc} unread mention${mc === 1 ? '' : 's'}.`;
+      return { kind: 'greeting', text: t };
+    }
+  }
+  // Mention heads-up — throttled, only while you have unread mentions.
+  if (now - (lastMentionNudge.get(user.id) || 0) > NUDGE_COOLDOWN_MS) {
+    const mc = unseenMentionCount(user.id);
+    if (mc > 0) {
+      lastMentionNudge.set(user.id, now);
+      const top = recentUnseenMentions(user.id, 1)[0];
+      let t = `${mc} unread mention${mc === 1 ? '' : 's'} in the backchannel`;
+      if (top) t += ` (latest from @${top.author} in #${top.room_slug})`;
+      return { kind: 'mention', text: t };
+    }
+  }
+  return null;
 }
 
 function wsError(ws, message) {
