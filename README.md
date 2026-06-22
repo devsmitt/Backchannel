@@ -156,6 +156,10 @@ All tunables are environment variables, so behavior is testable without code cha
 | `SWEEP_MS` | `60000` (60 s) | How often the periodic sweep runs (building→offline flips, retention prune, roster re-broadcast). |
 | `DB_PATH` | `./backchannel.db` | SQLite file path. **Point this at a mounted volume in production.** |
 | `PORT` | `8080` | HTTP/WS listen port. |
+| `DB_KEY` | _(unset)_ | 64 hex chars (32 bytes) → encrypts the **entire** database at rest (SQLCipher). Unset = plaintext. Set it once and the existing file migrates in place on boot. **Losing it means losing the DB.** See [SECURITY.md](SECURITY.md). |
+| `ADMIN_TOKEN` | _(unset)_ | ≥32-char secret enabling the owner-only `/admin/*` control plane (driven by `admin.js`). Unset = admin surface fully disabled (fail-closed). |
+| `GIPHY_API_KEY` | _(unset)_ | Enables the GIF picker via a server-side GIPHY proxy. Unset = GIFs unavailable. |
+| `GENESIS_INVITES` | _(unset)_ | Space/comma-separated open invite codes seeded on boot, so the **first** account on a fresh deploy can be claimed (it's invite-only). |
 
 ---
 
@@ -173,9 +177,10 @@ Backchannel is deliberately small: **one Node process and a single SQLite file.*
 
 **Notes**
 
-- `better-sqlite3` is a native module — it builds against the platform during `npm install`. Railway's standard Node image handles this; if you containerize yourself, make sure build tools (`python3`, `make`, a C++ toolchain) are present.
-- **Migrations are safe to re-run.** The schema is created if missing and the new v2 columns (`tagline`, `last_active`, `total_builds`, `build_seconds`, `streak_days`, `last_build_day` on users; `type`, `position` on rooms) are added via `ALTER` only if absent — so upgrading an existing v1 database in place is fine.
-- There's **no separate database service.** The "database" is the file on the volume. Back it up by snapshotting the volume.
+- `better-sqlite3-multiple-ciphers` (a drop-in superset of `better-sqlite3` with SQLCipher built in) is a native module — it builds against the platform during `npm install`. Railway's standard Node image handles this; if you containerize yourself, make sure build tools (`python3`, `make`, a C++ toolchain) are present.
+- **Migrations are safe to re-run.** The schema is created if missing and new columns are added via `ALTER` only if absent — so upgrading an existing database in place is fine.
+- **Encryption at rest:** set `DB_KEY` (64 hex) and the whole SQLite file is encrypted; an existing plaintext file migrates itself on the first boot with the key. Any backup of the file is then ciphertext. See [SECURITY.md](SECURITY.md).
+- There's **no separate database service.** The "database" is the file on the volume. Back it up by snapshotting the volume (already encrypted if `DB_KEY` is set).
 - The `/install.sh` route bakes the server's real origin into the installer at request time (derived from `x-forwarded-proto` / `x-forwarded-host`), so `curl https://yourapp/install.sh | sh` just works once deployed.
 
 ### Local

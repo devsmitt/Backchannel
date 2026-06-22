@@ -9,3 +9,6 @@ node_modules
 # private admin docs + any local admin secret (never publish)
 ADMIN.md
 *.admin-secret
+
+# internal planning doc — kept local
+backchannel-prd.md
