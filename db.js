@@ -67,6 +67,8 @@ const DB_ENCRYPTED = RAW_DB_KEY.length === 64;
 
 function applyDbKey(conn) {
   conn.pragma('cipher = "sqlcipher"');
+  // Safe interpolation ONLY because RAW_DB_KEY is validated as 64 hex chars above
+  // (PRAGMA can't take bound params). Do not relax that regex without revisiting this.
   conn.pragma(`key = "x'${RAW_DB_KEY}'"`);
 }
 function isPlaintextSqliteFile(p) {
@@ -397,12 +399,10 @@ const stmtDevicesForUser = db.prepare(
 // Flip a token's environment to "build" (drives presence). Returns true on change.
 const stmtMarkDeviceAgent = db.prepare('UPDATE device_tokens SET agent = 1 WHERE token_hash = ? AND agent = 0');
 const stmtRemoveDevice = db.prepare('DELETE FROM device_tokens WHERE id = ? AND user_id = ?');
-const stmtRemoveDeviceByHash = db.prepare('DELETE FROM device_tokens WHERE token_hash = ?');
 const stmtRevokeAllDevices = db.prepare('DELETE FROM device_tokens WHERE user_id = ?');
 const stmtTouchDevice = db.prepare('UPDATE device_tokens SET last_seen = ? WHERE token_hash = ?');
 const stmtUserByName = db.prepare('SELECT * FROM users WHERE username = ?');
 const stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?');
-const stmtUpdateToken = db.prepare('UPDATE users SET token_hash = ? WHERE id = ?');
 const stmtSetTagline = db.prepare('UPDATE users SET tagline = ? WHERE id = ?');
 const stmtSetColor = db.prepare('UPDATE users SET color = ? WHERE id = ?');
 
@@ -536,15 +536,6 @@ const stmtDeleteProject = db.prepare(
 // Users / identity.
 // ---------------------------------------------------------------------------
 
-/**
- * Create a user. Returns { id, username }, or throws on a UNIQUE violation
- * (username or token_hash already taken). Caller maps that to a 409.
- */
-export function createUser(username, tokenHash, recoveryHash) {
-  const info = stmtInsertUser.run(username, tokenHash, recoveryHash, Date.now());
-  return { id: info.lastInsertRowid, username };
-}
-
 // ---------------------------------------------------------------------------
 // Invites — signup is invite-only.
 // ---------------------------------------------------------------------------
@@ -631,19 +622,22 @@ export function claimWithInvite(username, tokenHash, recoveryHash, code, label =
 // - Seed any user who owns zero invites — i.e. existing users on the first boot
 //   after this system lands. A no-op once everyone holds codes.
 (() => {
-  const genesis = String(process.env.GENESIS_INVITES || '')
-    .split(/[\s,]+/).map(normInvite).filter(Boolean);
-  for (const code of genesis) {
-    if (!stmtInviteByCode.get(code)) {
-      try { stmtInsertInvite.run(code, null, Date.now()); } catch { /* ignore */ }
+  // Guarded: a throw here would abort module load and crash the server on boot.
+  try {
+    const genesis = String(process.env.GENESIS_INVITES || '')
+      .split(/[\s,]+/).map(normInvite).filter(Boolean);
+    for (const code of genesis) {
+      if (!stmtInviteByCode.get(code)) {
+        try { stmtInsertInvite.run(code, null, Date.now()); } catch { /* ignore */ }
+      }
     }
-  }
-  const needing = db.prepare(
-    'SELECT id FROM users WHERE id NOT IN (SELECT owner_id FROM invites WHERE owner_id IS NOT NULL)'
-  ).all();
-  if (needing.length) {
-    db.transaction(() => { for (const u of needing) mintInvitesInner(u.id, INVITE_GRANT); })();
-  }
+    const needing = db.prepare(
+      'SELECT id FROM users WHERE id NOT IN (SELECT owner_id FROM invites WHERE owner_id IS NOT NULL)'
+    ).all();
+    if (needing.length) {
+      db.transaction(() => { for (const u of needing) mintInvitesInner(u.id, INVITE_GRANT); })();
+    }
+  } catch (e) { console.error('[backchannel] invite bootstrap:', e); }
 })();
 
 /** Resolve a user from a token hash (the per-socket / hook auth lookup). */
@@ -682,15 +676,20 @@ export function removeDevice(userId, deviceId) {
   return stmtRemoveDevice.run(Number(deviceId), userId).changes > 0;
 }
 
-/** Revoke a specific token (used by rotate on the current device). */
-export function removeDeviceByTokenHash(tokenHash) {
-  stmtRemoveDeviceByHash.run(tokenHash);
-}
-
 /** Revoke ALL of a user's environments (recovery resets everything). */
 export function revokeAllDevices(userId) {
   stmtRevokeAllDevices.run(userId);
 }
+
+/**
+ * Recovery reset, atomically: revoke every environment and add this one fresh,
+ * in a single transaction. Without the transaction a crash between the two writes
+ * could leave the account with zero devices (locked out). Returns the new device id.
+ */
+export const resetDevicesTo = db.transaction((userId, tokenHash, label, now, agent) => {
+  stmtRevokeAllDevices.run(userId);
+  return addDeviceToken(userId, tokenHash, label, now, agent);
+});
 
 /** Stamp an environment's last-seen (on connect). */
 export function touchDevice(tokenHash, now = Date.now()) {
@@ -710,11 +709,6 @@ export function userByName(username) {
 /** Resolve a user by id. */
 export function userById(id) {
   return stmtUserById.get(id);
-}
-
-/** Re-bind a username's identity to a new token hash (recovery flow). */
-export function updateToken(userId, newTokenHash) {
-  stmtUpdateToken.run(newTokenHash, userId);
 }
 
 /**

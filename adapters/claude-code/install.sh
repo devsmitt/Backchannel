@@ -455,6 +455,9 @@ DIR="${BACKCHANNEL_CONFIG_DIR:-$HOME/.config/backchannel}"
 # Read the hook JSON from stdin ONCE, then pull session_id from it (best-effort).
 STDIN_JSON="$(cat 2>/dev/null || printf '')"
 SID="$(printf '%s' "$STDIN_JSON" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+# We build the request JSON by hand below, so keep SID to a safe charset — a stray
+# quote/backslash from a future id format would otherwise produce malformed JSON.
+SID="$(printf '%s' "$SID" | tr -cd 'A-Za-z0-9_-')"
 
 command -v curl >/dev/null 2>&1 || exit 0
 [ -r "$DIR/token" ] || exit 0

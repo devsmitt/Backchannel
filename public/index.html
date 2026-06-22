@@ -219,8 +219,6 @@
   .stream { overflow-y: auto; padding: 22px 40px 12px; display: flex; flex-direction: column; scrollbar-width: thin; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .streamspacer { flex: 1 1 auto; min-height: 0; }  /* push few msgs to bottom; collapses on overflow */
   .col { max-width: 760px; width: 100%; }
-  .daydiv { display: flex; align-items: center; gap: 14px; margin: 6px 0 16px; color: var(--ghost); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; }
-  .daydiv::before, .daydiv::after { content: ""; height: 1px; background: var(--line); flex: 1; }
 
   /* right gutter reserves room for the absolute "+" so wrapped text never runs under it */
   .msg { padding: 8px 38px 2px 0; position: relative; }
@@ -331,13 +329,6 @@
   @keyframes gateIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
   .gate-foot { position: absolute; left: 0; right: 0; bottom: 34px; display: flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ghost); }
   .gate-foot .foot-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 8px color-mix(in srgb, var(--live) 60%, transparent); }
-  .gateglyph {
-    width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 24px;
-    border: 1px solid var(--ghost); display: flex; align-items: center; justify-content: center;
-  }
-  .gateglyph .core { width: 9px; height: 9px; border-radius: 50%; background: var(--ghost); }
-  .gateglyph.lit { border-color: color-mix(in srgb, var(--live) 35%, transparent); }
-  .gateglyph.lit .core { background: var(--live); box-shadow: 0 0 10px color-mix(in srgb, var(--live) 60%, transparent); }
   .gate h2 { margin: 0 0 12px; font-family: var(--mono); font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
   .gate p { margin: 0 auto; font-size: 14px; line-height: 1.65; color: var(--faint); max-width: 42ch; }
 
@@ -382,8 +373,6 @@
   .installblock .authbtn:hover { filter: brightness(1.07); }
   .installblock .authbtn.danger { color: var(--danger); background: none; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); }
   .installblock .authbtn.danger:hover { filter: none; background: color-mix(in srgb, var(--danger) 12%, transparent); }
-  .installblock .orline { display: flex; align-items: center; gap: 12px; margin: 22px 0 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ghost); }
-  .installblock .orline::before, .installblock .orline::after { content: ""; height: 1px; background: var(--line); flex: 1; }
   .installblock .recover-link { margin-top: 18px; font-size: 11px; color: var(--faint); }
   .installblock .recover-link:hover { color: var(--dim); }
   .installblock .recoverfields { text-align: left; margin-top: 12px; }
@@ -420,7 +409,6 @@
   .stats { display: flex; padding: 22px 28px; border-bottom: 1px solid var(--line); }
   .stat { flex: 1; text-align: center; }
   .stat .v { font-family: var(--mono); font-size: 22px; line-height: 1.1; color: var(--text); }
-  .stat .v .unit { font-size: 13px; color: var(--faint); margin-left: 1px; font-weight: 400; }
   .stat .l { font-family: var(--mono); font-size: 9.5px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); margin-top: 7px; }
   .stat .v.accent { color: var(--live); }
 
@@ -445,8 +433,6 @@
   textarea.field { font-size: 13.5px; min-height: 40px; line-height: 1.5; }
 
   .edit-row { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
-  .editline { display: flex; gap: 8px; align-items: center; }
-  .editline input { flex: 1; }
   .saverow { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
   .smallbtn { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bg); background: var(--live); border: none; border-radius: 6px; padding: 8px 15px; font-weight: 600; cursor: pointer; }
   .smallbtn:hover { filter: brightness(1.07); }
@@ -659,7 +645,7 @@
           <div class="recoverfields" id="recoverFields" hidden>
             <div class="recover-warn"><b>The nuclear option — read this.</b> Recovering signs out <b>every</b> other environment: your phone, every browser, and every build machine. Your agent stops marking you present until you re-install on each one. Only do this if you've truly lost access everywhere. Just adding this device? Use a pairing code above instead.</div>
             <input class="field authfield" id="recUser" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="username" />
-            <div class="phrasegrid" id="phraseGrid">
+            <div class="phrasegrid">
               <input class="field phraseword" data-i="0" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="1" />
               <input class="field phraseword" data-i="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="2" />
               <input class="field phraseword" data-i="2" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="3" />
@@ -1151,14 +1137,6 @@
       ? "@" + dmLabel(r)
       : "#" + channelName(r);
   }
-  function topicFor(slug) {
-    const t = {
-      general: "shop talk for whoever's mid-build",
-      help: "stuck? drop it here",
-      showcase: "show what you shipped",
-    };
-    return t[slug] || "";
-  }
 
   // ---- Quick-switch dropdown (header title) -------------------------------
   // The channel name in the header opens a menu of channels + DMs (with unread
@@ -1359,7 +1337,7 @@
       const b = document.createElement("button");
       b.type = "button";
       b.className = "rxn" + (mineSet.has(r.emoji) ? " on" : "");
-      b.innerHTML = '<span class="rxn-e">' + r.emoji + '</span><span class="rxn-n">' + esc(String(r.count)) + '</span>';
+      b.innerHTML = '<span class="rxn-e">' + esc(r.emoji) + '</span><span class="rxn-n">' + esc(String(r.count)) + '</span>';
       b.addEventListener("click", (e) => { e.stopPropagation(); sendReact(row.dataset.mid, r.emoji); });
       wrap.appendChild(b);
     });
@@ -1527,7 +1505,7 @@
 
     sock.onclose = () => {
       stopHeartbeat();
-      ws = null;
+      if (ws === sock) ws = null;   // a stale socket's late close must not null the live one
       if (manualClose) return;
       if (signedIn) body.classList.add("reconnecting");
       scheduleReconnect();
@@ -2142,8 +2120,10 @@
   // A fresh 256-bit secret, minted in the browser for the recovery rebind. The
   // server only ever stores its hash; the raw token stays local (like install).
   function genToken() {
+    const c = (typeof crypto !== "undefined" && crypto) || window.crypto;
+    if (!c || !c.getRandomValues) return null;   // non-secure context: caller surfaces a friendly error
     const a = new Uint8Array(32);
-    (crypto || window.crypto).getRandomValues(a);
+    c.getRandomValues(a);
     return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
   }
   function adoptToken(t) {  // store + connect with a freshly-obtained token
@@ -2216,6 +2196,7 @@
     if (!u || !p) return;
     clearSigninError();
     const newToken = genToken();
+    if (!newToken) { showSigninError("secure crypto unavailable — open this over https"); return; }
     fetch("/recover", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, recovery: p, newToken: newToken }) })
       .then((r) => { if (r.status === 200) return r.json(); if (r.status === 429) throw new Error("too many tries — wait a few minutes"); throw new Error("that username + phrase didn't match"); })
       .then(() => adoptToken(newToken))

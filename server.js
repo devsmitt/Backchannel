@@ -30,7 +30,6 @@ import { WebSocketServer } from 'ws';
 import {
   sha256,
   CAPS,
-  createUser,
   countUsers,
   claimWithInvite,
   invitesForUser,
@@ -44,6 +43,7 @@ import {
   listDevices,
   removeDevice,
   revokeAllDevices,
+  resetDevicesTo,
   touchDevice,
   deleteUser,
   setTagline,
@@ -150,7 +150,9 @@ const RECOVER_WINDOW_MS = 10 * 60 * 1000;
 const PAIR_CODE_TTL_MS = 5 * 60 * 1000; // a pairing code is valid for 5 minutes
 const PAIR_CODE_LEN = 8;                // url-safe chars in a pairing code
 
-// Rate-limit recovery-phrase guessing per username (preserved from v1).
+// Rate-limit recovery-phrase guessing per username (preserved from v1). Paired
+// with a per-IP limiter on the route itself; this Map is swept (see `sweep`) so
+// guessing distinct usernames can't grow it without bound.
 const recoverTries = new Map();         // username -> { count, resetAt }
 function recoverBlocked(username) {
   const now = Date.now();
@@ -158,6 +160,9 @@ function recoverBlocked(username) {
   if (!r || now > r.resetAt) { r = { count: 0, resetAt: now + RECOVER_WINDOW_MS }; recoverTries.set(username, r); }
   r.count += 1;
   return r.count > RECOVER_MAX_TRIES;
+}
+function sweepRecoverTries(now = Date.now()) {
+  for (const [k, r] of recoverTries) if (now > r.resetAt) recoverTries.delete(k);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,8 +214,11 @@ const limitTyping    = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });     
 const limitReact     = makeLimiter({ capacity: 40,  windowMs: 10 * 1000 });        // WS 'react' per userId: 40 / 10s
 const limitGif       = makeLimiter({ capacity: 40,  windowMs: 60 * 1000 });        // /gif/* per IP: 40 / min
 const limitAdmin     = makeLimiter({ capacity: 60,  windowMs: 60 * 1000 });        // /admin/* per ip + global: 60 / min
+const limitRecover   = makeLimiter({ capacity: 10,  windowMs: 60 * 1000 });        // /recover per IP: 10/min (guess guard, IP-side)
+const limitWsCtrl    = makeLimiter({ capacity: 60,  windowMs: 10 * 1000 });        // WS control msgs per userId: 60 / 10s (join/profile/open_dm/...)
+const limitOpenDm    = makeLimiter({ capacity: 10,  windowMs: 60 * 1000 });        // WS 'open_dm' per userId: 10/min (room-creation guard)
 
-const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitVerify, limitDelete, limitSay, limitUpload, limitTyping, limitReact, limitGif, limitAdmin];
+const allLimiters = [limitClaim, limitPairNew, limitPairRedeem, limitPresence, limitVerify, limitDelete, limitSay, limitUpload, limitTyping, limitReact, limitGif, limitAdmin, limitRecover, limitWsCtrl, limitOpenDm];
 
 // ---------------------------------------------------------------------------
 // Admin surface config. ADMIN_TOKEN is a high-entropy secret (>=32 chars) that
@@ -952,6 +960,7 @@ const server = http.createServer(async (req, res) => {
     const parsed = await readJsonBody(req);
     if (parsed.tooBig) { sendJson(res, 413, { error: 'too large' }); return; }
     const body = parsed.body;
+    if (!limitRecover.allow('ip:' + clientIp(req))) { sendJson(res, 429, { error: 'rate limited' }); return; }
     const username = normalizeUsername(body && body.username);
     const recovery = body && typeof body.recovery === 'string' ? body.recovery : '';
     const newToken = body && typeof body.newToken === 'string' ? body.newToken : '';
@@ -962,10 +971,11 @@ const server = http.createServer(async (req, res) => {
     if (!user || user.recovery_hash !== sha256(recovery)) { sendJson(res, 403, { error: 'no match' }); return; }
     if (user.banned) { sendJson(res, 403, { error: 'banned' }); return; }   // banned: phrase can't recover back in
     try {
-      revokeAllDevices(user.id);                                                  // wipe every environment
+      // Atomic: wipe every environment and add this one fresh in one transaction,
+      // so a crash mid-reset can't leave the account with zero devices (locked out).
       // agent flag: the installer recovers into a build environment; the in-app
       // (browser) recover is view-only. Caller declares it via body.agent.
-      addDeviceToken(user.id, sha256(newToken), deviceLabel(req, body && body.label), Date.now(), !!(body && body.agent)); // and pair this one fresh
+      resetDevicesTo(user.id, sha256(newToken), deviceLabel(req, body && body.label), Date.now(), !!(body && body.agent));
       sendJson(res, 200, { ok: true });
     } catch (e) {
       console.error('[backchannel] recover:', e);
@@ -1385,6 +1395,7 @@ function broadcastMessage(room, senderUserId, payload) {
 // Parse @mentions out of a message and persist one per real, eligible user
 // (channels: anyone; dm/group: members only; never the author). Powers the nudge.
 const MENTION_RE = /@([a-z0-9_-]{2,24})/gi;
+const MENTIONS_PER_MESSAGE_MAX = 10;   // cap the lookups + rows one message can spawn
 function storeMentions(room, message, authorName, body) {
   const seen = new Set();
   let m;
@@ -1393,6 +1404,7 @@ function storeMentions(room, message, authorName, body) {
     const name = m[1].toLowerCase();
     if (seen.has(name) || name === authorName) continue;
     seen.add(name);
+    if (seen.size > MENTIONS_PER_MESSAGE_MAX) break;
     const u = userByName(name);
     if (!u) continue;
     if (room.type !== 'channel' && !isMember(room.id, u.id)) continue;
@@ -1443,6 +1455,28 @@ function computeNudge(user, now) {
 
 function wsError(ws, message) {
   try { ws.send(JSON.stringify({ type: 'error', message })); } catch { /* harmless */ }
+}
+
+// Resolve a WS message's `room` ref (a slug or a numeric id) to a room row, or null.
+function resolveRoom(ref) {
+  if (typeof ref === 'number') return roomById(ref) || null;
+  if (typeof ref === 'string') return roomBySlug(ref.trim()) || roomById(Number(ref)) || null;
+  return null;
+}
+
+// Re-send the caller's own profile (used after a tagline/project edit).
+function sendOwnProfile(ws) {
+  const fresh = profileByName(ws.username);
+  if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: withInvites(fresh, ws.userId) })); } catch { /* closing */ } }
+}
+
+// Send the caller their paired-environment list (used by list_devices + after a revoke).
+function sendDeviceList(ws) {
+  const devices = listDevices(ws.userId).map((d) => ({
+    id: d.id, label: d.label || '', createdAt: d.created_at, lastSeen: d.last_seen,
+    current: d.id === ws.deviceId, agent: !!d.agent,
+  }));
+  try { ws.send(JSON.stringify({ type: 'devices', devices })); } catch { /* closing */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -1566,14 +1600,20 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    // Generic per-socket backstop for control messages. Each one below hits the
+    // DB (and some fan out a roster broadcast), so a single socket spamming
+    // join/profile/set_color/... could pin CPU/DB. The hot paths (say/typing/
+    // react) keep their own tighter limiters; ping/pong stay exempt.
+    if (ws.userId && msg.type !== 'ping' && msg.type !== 'pong' &&
+        msg.type !== 'say' && msg.type !== 'typing' && msg.type !== 'react') {
+      if (!limitWsCtrl.allow(ws.userId)) return;
+    }
+
     // --- join: subscribe + send last-50 history --------------------------
     // room may be a slug or an id; resolve, then membership-gate dm/group.
     if (msg.type === 'join') {
       if (!ws.userId) return;
-      const ref = msg.room;
-      let room = null;
-      if (typeof ref === 'number') room = roomById(ref);
-      else if (typeof ref === 'string') room = roomBySlug(ref.trim()) || roomById(Number(ref));
+      const room = resolveRoom(msg.room);
       if (!room) { wsError(ws, 'no such room'); return; }
       if (!canAccessRoom(ws.userId, room)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
       ws.room = room.slug;
@@ -1594,10 +1634,7 @@ wss.on('connection', (ws) => {
       // The gate: only a user whose agent is currently building may speak.
       if (!isPresent(ws.userId)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
 
-      const ref = msg.room;
-      let room = null;
-      if (typeof ref === 'number') room = roomById(ref);
-      else if (typeof ref === 'string') room = roomBySlug(ref.trim()) || roomById(Number(ref));
+      const room = resolveRoom(msg.room);
       if (!room) return;
       if (!canAccessRoom(ws.userId, room)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
 
@@ -1626,10 +1663,7 @@ wss.on('connection', (ws) => {
       if (!ws.userId) return;
       if (!limitTyping.allow(ws.userId)) return;       // silently drop floods
       if (!isPresent(ws.userId)) return;               // only builders type
-      const ref = msg.room;
-      let room = null;
-      if (typeof ref === 'number') room = roomById(ref);
-      else if (typeof ref === 'string') room = roomBySlug(ref.trim()) || roomById(Number(ref));
+      const room = resolveRoom(msg.room);
       if (!room || !canAccessRoom(ws.userId, room)) return;
       setTyping(room, ws.userId, ws.username, !!msg.state);
       return;
@@ -1655,11 +1689,7 @@ wss.on('connection', (ws) => {
     // --- list_devices: your paired environments (for the profile) --------
     if (msg.type === 'list_devices') {
       if (!ws.userId) return;
-      const devices = listDevices(ws.userId).map((d) => ({
-        id: d.id, label: d.label || '', createdAt: d.created_at, lastSeen: d.last_seen,
-        current: d.id === ws.deviceId, agent: !!d.agent,
-      }));
-      try { ws.send(JSON.stringify({ type: 'devices', devices })); } catch {}
+      sendDeviceList(ws);
       return;
     }
 
@@ -1668,11 +1698,7 @@ wss.on('connection', (ws) => {
       if (!ws.userId) return;
       const id = Number(msg.id);
       if (id && id !== ws.deviceId) removeDevice(ws.userId, id);   // can't revoke yourself here
-      const devices = listDevices(ws.userId).map((d) => ({
-        id: d.id, label: d.label || '', createdAt: d.created_at, lastSeen: d.last_seen,
-        current: d.id === ws.deviceId, agent: !!d.agent,
-      }));
-      try { ws.send(JSON.stringify({ type: 'devices', devices })); } catch {}
+      sendDeviceList(ws);
       return;
     }
 
@@ -1692,8 +1718,7 @@ wss.on('connection', (ws) => {
       setTagline(ws.userId, text);
       // Echo the updated profile so the client can re-render, and refresh roster
       // (taglines show in the roster).
-      const fresh = profileByName(ws.username);
-      if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: withInvites(fresh, ws.userId) })); } catch {} }
+      sendOwnProfile(ws);
       broadcastRoster();
       return;
     }
@@ -1709,13 +1734,20 @@ wss.on('connection', (ws) => {
     // --- open_dm: find-or-create a dm/group for a set of usernames --------
     if (msg.type === 'open_dm') {
       if (!ws.userId) return;
-      const names = Array.isArray(msg.users) ? msg.users : [];
+      // Creating a private room writes permanent (never-pruned) rows and pushes a
+      // rail entry to every member, so gate it: must be present (like posting),
+      // rate-limited, and capped in size so one message can't spawn a huge group
+      // or be used to force-DM/spam others.
+      if (!isPresent(ws.userId)) { try { ws.send(JSON.stringify({ type: 'denied' })); } catch {} return; }
+      if (!limitOpenDm.allow(ws.userId)) return;
+      const names = Array.isArray(msg.users) ? msg.users.slice(0, 12) : [];
       const ids = new Set([ws.userId]); // always include self
       for (const n of names) {
         const u = typeof n === 'string' ? userByName(n.trim().toLowerCase()) : null;
         if (u) ids.add(u.id);
       }
       if (ids.size < 2) { wsError(ws, 'need at least one other user'); return; }
+      if (ids.size > 12) { wsError(ws, 'too many people for one group'); return; }
       const room = findOrCreatePrivateRoom([...ids]);
       if (!room) { wsError(ws, 'could not open'); return; }
 
@@ -1742,10 +1774,7 @@ wss.on('connection', (ws) => {
     // from your rail until you open "hidden chats". Echoes your fresh dm lists.
     if (msg.type === 'archive_dm' || msg.type === 'unarchive_dm') {
       if (!ws.userId) return;
-      const ref = msg.room;
-      let room = null;
-      if (typeof ref === 'number') room = roomById(ref);
-      else if (typeof ref === 'string') room = roomBySlug(ref.trim()) || roomById(Number(ref));
+      const room = resolveRoom(msg.room);
       if (!room || room.type === 'channel') return;
       if (!isMember(room.id, ws.userId)) return;
       setArchived(room.id, ws.userId, msg.type === 'archive_dm');
@@ -1770,8 +1799,7 @@ wss.on('connection', (ws) => {
       if (!ws.userId) return;
       const result = addProject(ws.userId, msg.name, msg.url, msg.blurb);
       if (!result.ok) { wsError(ws, result.error); return; }
-      const fresh = profileByName(ws.username);
-      if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: withInvites(fresh, ws.userId) })); } catch {} }
+      sendOwnProfile(ws);
       return;
     }
 
@@ -1779,8 +1807,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'remove_project') {
       if (!ws.userId) return;
       removeProject(ws.userId, msg.id);
-      const fresh = profileByName(ws.username);
-      if (fresh) { try { ws.send(JSON.stringify({ type: 'profile_data', user: withInvites(fresh, ws.userId) })); } catch {} }
+      sendOwnProfile(ws);
       return;
     }
 
@@ -1851,7 +1878,7 @@ const sweep = setInterval(() => {
   try { sweepPairings(); } catch (e) { console.error('[backchannel] pair sweep:', e); }
 
   // Evict idle rate-limit buckets so the limiter Maps can't grow unbounded.
-  try { for (const lim of allLimiters) lim.sweep(); } catch (e) { console.error('[backchannel] limiter sweep:', e); }
+  try { for (const lim of allLimiters) lim.sweep(); sweepRecoverTries(); } catch (e) { console.error('[backchannel] limiter sweep:', e); }
 
   try {
     const roster = buildRoster();
