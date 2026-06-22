@@ -347,9 +347,15 @@
   .lander-sub { margin: 22px auto 0; font-size: 13px; line-height: 1.7; color: var(--faint); max-width: 44ch; }
   .gate .lander-sub { margin-top: 16px; }   /* beats `.gate p {margin:0}`; gives the indicator a touch of room above the paragraph */
   .lander-note { margin: 28px auto 0; font-family: var(--mono); font-size: 11px; line-height: 1.6; letter-spacing: 0.02em; color: var(--ghost); max-width: 40ch; }
-  .gate-source { display: inline-flex; align-items: center; gap: 7px; margin-top: 26px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--faint); text-decoration: none; transition: color 120ms ease; }
-  .gate-source:hover { color: var(--live); }
-  .gate-source svg { flex: none; opacity: 0.9; }
+  /* Quiet footer link. The card stays vertically centered via its auto margins,
+     while the link rides the bottom IN FLOW — so when the "new here / already have
+     an account" sections expand and the page scrolls, the link follows the content
+     instead of overlapping it. */
+  .gate.signin { flex-direction: column; }
+  .gate.signin .gatecard { margin-top: auto; margin-bottom: auto; }
+  .gate-source { flex: none; margin: 14px auto 0; display: flex; align-items: center; justify-content: center; gap: 7px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; color: var(--ghost); text-decoration: none; transition: color 120ms ease; }
+  .gate-source:hover { color: var(--faint); }
+  .gate-source svg { flex: none; opacity: 0.85; }
 
   .pulse { display: flex; width: fit-content; align-items: center; gap: 8px; margin: 63px auto 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--dim); }
   .pulse[hidden] { display: none; }   /* the class sets display:flex, which would otherwise defeat the hidden attribute */
@@ -656,12 +662,12 @@
       </div>
 
       <div class="lander-note">invite-only for now. you'll need a code from a builder who's already in.</div>
-
-      <a class="gate-source" href="https://github.com/devsmitt/Backchannel" target="_blank" rel="noopener noreferrer" title="read the source on GitHub">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-        <span>view source on github</span>
-      </a>
     </div>
+
+    <a class="gate-source" href="https://github.com/devsmitt/Backchannel" target="_blank" rel="noopener noreferrer" title="read the source on GitHub">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span>view source on github</span>
+    </a>
   </div>
 
   <!-- token sign-in lives only behind the installer's rare fallback; kept off the
