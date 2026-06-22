@@ -242,19 +242,26 @@ db.exec(`
 
 // One-time: seed device_tokens from the legacy single users.token_hash so existing
 // accounts keep working (their current token becomes their first paired device).
-// Idempotent — skipped once a token already exists in device_tokens.
+//
+// MUST be a true one-time migration, gated on the user having NO devices at all —
+// NOT on the legacy hash being absent. A user always keeps their current device
+// (you can't revoke the one you're on), so "has any device" means "already
+// provisioned". Gating on the legacy hash instead would RESURRECT a revoked
+// environment: revoking the device that matches users.token_hash leaves that hash
+// missing from device_tokens, so the next boot would re-add it as a phantom
+// 'existing' device (and re-validate the revoked token). Per-user gating prevents that.
 (() => {
   try {
     const rows = db.prepare(
       "SELECT id, token_hash, created_at FROM users WHERE token_hash IS NOT NULL AND token_hash != ''"
     ).all();
-    const seen = db.prepare('SELECT 1 FROM device_tokens WHERE token_hash = ?');
+    const hasAnyDevice = db.prepare('SELECT 1 FROM device_tokens WHERE user_id = ? LIMIT 1');
     const ins = db.prepare(
       'INSERT OR IGNORE INTO device_tokens (user_id, token_hash, label, created_at, last_seen) VALUES (?, ?, ?, ?, ?)'
     );
     const now = Date.now();
     for (const u of rows) {
-      if (!seen.get(u.token_hash)) ins.run(u.id, u.token_hash, 'existing', u.created_at || now, now);
+      if (!hasAnyDevice.get(u.id)) ins.run(u.id, u.token_hash, 'existing', u.created_at || now, now);
     }
   } catch (e) { /* table just created; fine */ }
 })();
