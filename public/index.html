@@ -722,19 +722,40 @@
     for (const k in unread) { if (!hidden.has(k)) n += unread[k] || 0; }
     return n;
   }
-  function faviconSvg(dotColor) {
+  function faviconSvg(dotColor, radius, opacity) {
+    radius = radius == null ? 5 : radius;
+    opacity = opacity == null ? 1 : opacity;
     return "data:image/svg+xml," + encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
       '<rect width="32" height="32" rx="7" fill="#0a0b0d"/>' +
-      '<circle cx="16" cy="16" r="5" fill="' + dotColor + '"/></svg>'
+      '<circle cx="16" cy="16" r="' + radius.toFixed(1) + '" fill="' + dotColor + '" opacity="' + opacity.toFixed(2) + '"/></svg>'
     );
   }
-  function setFavicon(hasUnread) {
+  function setFaviconHref(href) {
     let link = document.getElementById("favicon");
     if (!link) { link = document.createElement("link"); link.id = "favicon"; link.rel = "icon"; document.head.appendChild(link); }
-    // Your accent dot when you're active in the channel (or have something
-    // waiting); a calm gray dot otherwise.
-    link.href = faviconSvg((present || hasUnread) ? currentAccent() : "#565b61");
+    link.href = href;
+  }
+  // Re-set the favicon on a timer to animate it (animated GIF/APNG favicons don't
+  // work in Chrome; re-assigning the href does). Time-based phase so the pulse
+  // looks right whether the tab is foreground or throttled in the background.
+  let faviconPulseTimer = null;
+  function stopFaviconPulse() { if (faviconPulseTimer) { clearInterval(faviconPulseTimer); faviconPulseTimer = null; } }
+  function startFaviconPulse() {
+    if (faviconPulseTimer) return;
+    const frame = () => {
+      const t = 0.5 + 0.5 * Math.sin(Date.now() / 220);   // 0..1, ~1.4s period
+      setFaviconHref(faviconSvg(currentAccent(), 4.3 + 1.6 * t, 0.4 + 0.6 * t));
+    };
+    frame();
+    faviconPulseTimer = setInterval(frame, 100);
+  }
+  function setFavicon(hasUnread) {
+    // Unread → your accent dot PULSES (a gentle nudge). Otherwise a steady dot:
+    // accent while you're active in the channel, calm gray when you're not.
+    if (hasUnread) { startFaviconPulse(); return; }
+    stopFaviconPulse();
+    setFaviconHref(faviconSvg(present ? currentAccent() : "#565b61"));
   }
   function updateTitle() {
     const n = totalUnread();
