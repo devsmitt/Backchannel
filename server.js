@@ -124,7 +124,7 @@ const EXIT_GRACE_MS = Number(process.env.EXIT_GRACE) || 45 * 1000;
 const BUILD_CAP_MS = Number(process.env.BUILD_CAP) || 2 * 60 * 60 * 1000;
 
 const MAX_BODY_LEN = 1000;              // hard cap on a chat line.
-const HISTORY_LIMIT = 150;              // backlog returned per room on entry (channels prune at RETENTION_MS).
+const HISTORY_LIMIT = 100;              // backlog returned per room on entry (channels prune at RETENTION_MS).
 // Fixed reaction palette — the client offers exactly these, the server accepts
 // only these. A closed set keeps the data clean and the UI tidy.
 const REACTIONS = ['👍', '🔥', '🎉', '👀', '❤️', '😂', '🙌', '🚀'];
