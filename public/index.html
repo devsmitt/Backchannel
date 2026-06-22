@@ -393,6 +393,8 @@
   body.signin-error #signinErr { opacity: 0.95; }
   .signedas { margin-top: 20px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; color: var(--faint); text-transform: uppercase; }
   .signedas b { color: var(--dim); font-weight: 500; }
+  .signedas-link { font: inherit; letter-spacing: inherit; text-transform: inherit; background: none; border: none; padding: 0; color: var(--dim); font-weight: 500; cursor: pointer; text-decoration: underline; text-decoration-color: var(--ghost); text-underline-offset: 3px; transition: color 120ms ease, text-decoration-color 120ms ease; }
+  .signedas-link:hover { color: var(--text); text-decoration-color: var(--faint); }
 
   /* ============================================================ PROFILE OVERLAY */
   .overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 40; align-items: flex-start; justify-content: center; padding: 60px 22px; overflow-y: auto; }
@@ -1535,7 +1537,12 @@
     try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
 
     meNameEl.textContent = "@" + username;
-    notpresentWho.innerHTML = "signed in as <b>@" + esc(username) + "</b>";
+    // The username is clickable here so you can reach your profile (and mint a
+    // pairing code) WITHOUT the channel being open — otherwise a broken agent
+    // environment is a chicken-and-egg: the pairing code lives behind the app.
+    notpresentWho.innerHTML = 'signed in as <button type="button" class="signedas-link" id="notpresentProfileBtn">@' + esc(username) + "</button>";
+    const npBtn = document.getElementById("notpresentProfileBtn");
+    if (npBtn) npBtn.addEventListener("click", () => openProfile(username));
 
     // Your identity color is your accent, synced via the server across devices.
     // If the server has one, adopt it as this device's accent; otherwise claim
