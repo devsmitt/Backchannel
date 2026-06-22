@@ -58,7 +58,8 @@ All optional, all env vars:
 | `GIPHY_API_KEY` | off | Turns on the GIF picker (proxied server-side). |
 | `GENESIS_INVITES` | off | Seed invite codes so the first account on a fresh deploy can sign up. It's invite-only. |
 | `BUILDING_WINDOW` | 30 min | How long after a build you stay "building" before going offline. |
-| `RETENTION_MS` | 6 h | Messages older than this are pruned. |
+| `RETENTION_MS` | 6 h | Channel messages older than this are pruned. |
+| `DM_IMAGE_TTL_MS` | 24 h | DMs never prune, but their uploaded images expire after this and leave an "image expired" placeholder, so disk stays bounded. |
 | `PORT` | `8080` | Listen port. |
 
 ## How it works
