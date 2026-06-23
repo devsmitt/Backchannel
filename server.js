@@ -50,6 +50,7 @@ import {
   setColor,
   getPrefs,
   setPrefs,
+  setOnboarded,
   recordEnter,
   recordExit,
   touchActive,
@@ -1338,6 +1339,7 @@ function sendHistory(ws, room) {
     const rr = reactByMsg[m.id] || [];
     return {
       id: m.id, username: m.username, body: m.body, image: m.image || null, gif: m.gif || null, ts: m.created_at,
+      system: !!m.system,
       reactions: reactionSummary(rr),
       mine: rr.filter((r) => r.user_id === ws.userId).map((r) => r.emoji),
     };
@@ -1593,6 +1595,7 @@ wss.on('connection', (ws) => {
           present: isPresent(user.id),
           unread: unreadCountsForUser(user.id),
           mentions: unseenMentionCount(user.id),
+          onboarded: !!user.onboarded,   // false -> client shows the first-run rules modal
         }));
       } catch { /* harmless */ }
 
@@ -1729,6 +1732,23 @@ wss.on('connection', (ws) => {
       if (!ws.userId) return;
       const prefs = setPrefs(ws.userId, msg.prefs);   // only known boolean keys are applied
       try { ws.send(JSON.stringify({ type: 'prefs', prefs })); } catch { /* closing */ }
+      return;
+    }
+
+    // --- ack_rules: first-run rules acknowledged. On the FIRST ack only, drop a
+    // "x just joined the backchannel" system line into #general for everyone.
+    if (msg.type === 'ack_rules') {
+      if (!ws.userId) return;
+      const firstTime = setOnboarded(ws.userId);
+      if (firstTime) {
+        const general = roomBySlug('general');
+        if (general) {
+          const { id, created_at } = insertMessage(general.id, ws.userId, ws.username, 'just joined the backchannel', null, null, true);
+          broadcastMessage(general, ws.userId, {
+            type: 'msg', room: general.slug, id, username: ws.username, body: 'just joined the backchannel', system: true, ts: created_at,
+          });
+        }
+      }
       return;
     }
 

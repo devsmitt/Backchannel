@@ -389,6 +389,25 @@
   /* ============================================================ PROFILE OVERLAY */
   .overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 40; align-items: flex-start; justify-content: center; padding: 60px 22px; overflow-y: auto; }
   body.profile-open .overlay-bg { display: flex; }
+
+  /* first-run rules modal — sits above everything (doors/gate/profile) */
+  .rules-bg { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.72); display: flex; align-items: center; justify-content: center; padding: max(24px, env(safe-area-inset-top)) 22px max(24px, env(safe-area-inset-bottom)); overflow-y: auto; }
+  .rules-bg[hidden] { display: none; }
+  .rules-card { width: 100%; max-width: 420px; background: var(--rail); border: 1px solid var(--line); border-radius: 14px; padding: 32px 30px; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
+  .rules-mark { font-family: var(--mono); font-size: 13px; letter-spacing: 0.34em; text-transform: uppercase; color: var(--text); text-align: center; }
+  .rules-lead { margin: 20px 0 0; font-size: 14.5px; line-height: 1.6; color: var(--dim); text-align: center; }
+  .rules-list { margin: 24px 0 4px; border-top: 1px solid var(--line); padding-top: 18px; }
+  .rules-head { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint); margin-bottom: 12px; }
+  .rules-list ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+  .rules-list li { font-family: var(--mono); font-size: 13.5px; color: var(--text); padding-left: 18px; position: relative; }
+  .rules-list li::before { content: "·"; position: absolute; left: 4px; color: var(--live); }
+  .rules-ack { margin-top: 26px; width: 100%; font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; color: var(--bg); background: var(--live); border: none; border-radius: 8px; padding: 13px; font-weight: 600; cursor: pointer; }
+  .rules-ack:hover { filter: brightness(1.07); }
+
+  /* system line in the stream ("x just joined") — centered, not a bubble */
+  .sysline { text-align: center; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.03em; color: var(--faint); padding: 10px 0 8px; }
+  .sysline .sys-u { color: var(--dim); cursor: pointer; }
+  .sysline .sys-u:hover { color: var(--text); }
   .profile { width: 100%; max-width: 520px; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; padding: 0; overflow: hidden; }
   .profile-head { padding: 26px 28px 22px; border-bottom: 1px solid var(--line); position: relative; }
   /* top-right cluster: message action + close, tucked neatly together */
@@ -691,6 +710,24 @@
       <div class="signedas" id="notpresentWho">&nbsp;</div>
     </div>
     <div class="gate-foot" id="notpresentCount" aria-live="polite"></div>
+  </div>
+
+  <!-- ============================== FIRST-RUN RULES MODAL ============================== -->
+  <div class="rules-bg" id="rulesModal" hidden>
+    <div class="rules-card">
+      <div class="rules-mark">backchannel</div>
+      <p class="rules-lead">You're in the backchannel only while an agent is working on your behalf. It's the place to be between prompts.</p>
+      <div class="rules-list">
+        <div class="rules-head">house rules</div>
+        <ul>
+          <li>be kind.</li>
+          <li>no spam.</li>
+          <li>no scams.</li>
+          <li>only invite good people.</li>
+        </ul>
+      </div>
+      <button class="rules-ack" id="rulesAck" type="button">got it — let me in</button>
+    </div>
   </div>
 
   <!-- ============================== PROFILE OVERLAY ============================== -->
@@ -1247,6 +1284,18 @@
   function clearStream() { streamColEl.innerHTML = ""; lastSender = null; }
 
   function appendMsg(m, isSelf) {
+    // System line (e.g. "@x just joined the backchannel") — centered, no bubble.
+    if (m.system) {
+      const row = document.createElement("div");
+      row.className = "sysline";
+      if (m.id != null) row.dataset.mid = String(m.id);
+      row.innerHTML = '<span class="sys-u">@' + esc(m.username) + '</span> ' + esc(m.body || "");
+      const u = row.querySelector(".sys-u");
+      if (u) u.addEventListener("click", () => openProfile(m.username));
+      streamColEl.appendChild(row);
+      lastSender = null;   // breaks message grouping
+      return;
+    }
     const cont = lastSender === m.username;
     const row = document.createElement("div");
     row.className = "msg" + (cont ? " cont" : "") + (isSelf ? " self" : "");
@@ -1550,7 +1599,24 @@
     updateTitle();  // reflect any seeded unread in the tab title/favicon
 
     applyPresence(m.present);
+    // First sign-in: show the rules modal over whatever screen we landed on
+    // (locked or unlocked). Acknowledging it records onboarding + announces you.
+    if (!m.onboarded) showRulesModal();
   }
+
+  // ---- First-run rules modal ----------------------------------------------
+  function showRulesModal() {
+    const el = document.getElementById("rulesModal");
+    if (el) el.hidden = false;
+  }
+  (() => {
+    const ack = document.getElementById("rulesAck");
+    if (ack) ack.addEventListener("click", () => {
+      const el = document.getElementById("rulesModal");
+      if (el) el.hidden = true;
+      send({ type: "ack_rules" });   // server records onboarding + posts "x just joined"
+    });
+  })();
 
   function onMsg(m) {
     if (!present) return;

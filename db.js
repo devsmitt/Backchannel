@@ -180,7 +180,8 @@ db.exec(`
     username   TEXT NOT NULL,
     body       TEXT NOT NULL,
     image      TEXT,
-    created_at INTEGER
+    created_at INTEGER,
+    system     INTEGER NOT NULL DEFAULT 0
   );
 
   -- Per-user read cursor: the highest message id this user has seen in a room.
@@ -286,7 +287,9 @@ function columnNames(table) {
 function addColumnIfMissing(table, column, ddl) {
   if (!columnNames(table).has(column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    return true;   // freshly added — callers can run a one-time backfill
   }
+  return false;
 }
 
 function migrate() {
@@ -304,6 +307,14 @@ function migrate() {
   addColumnIfMissing('users', 'prefs', "prefs TEXT NOT NULL DEFAULT '{}'");
   // permanent chronological "user #N" — assigned at claim, backfilled by id order.
   addColumnIfMissing('users', 'user_no', 'user_no INTEGER');
+  // first-run flag: set once the user acknowledges the rules modal (also gates the
+  // one-time "x just joined" announcement). New users default to 0; users that
+  // predate this column are treated as already onboarded (no modal, no join spam).
+  if (addColumnIfMissing('users', 'onboarded', 'onboarded INTEGER NOT NULL DEFAULT 0')) {
+    try { db.prepare('UPDATE users SET onboarded = 1').run(); } catch (e) { console.error('[backchannel] onboarded backfill:', e); }
+  }
+  // system messages (e.g. "x just joined") render as a centered line, not a bubble.
+  addColumnIfMissing('messages', 'system', 'system INTEGER NOT NULL DEFAULT 0');
   try {
     const missing = db.prepare('SELECT id FROM users WHERE user_no IS NULL ORDER BY id ASC, created_at ASC').all();
     if (missing.length) {
@@ -423,10 +434,10 @@ const stmtSetTagline = db.prepare('UPDATE users SET tagline = ? WHERE id = ?');
 const stmtSetColor = db.prepare('UPDATE users SET color = ? WHERE id = ?');
 
 const stmtInsertMessage = db.prepare(
-  'INSERT INTO messages (room_id, user_id, username, body, image, gif, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  'INSERT INTO messages (room_id, user_id, username, body, image, gif, created_at, system) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
 );
 const stmtRecentMessages = db.prepare(
-  'SELECT id, username, body, image, gif, created_at FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT ?'
+  'SELECT id, username, body, image, gif, created_at, system FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT ?'
 );
 const stmtMaxMsgId = db.prepare(
   'SELECT COALESCE(MAX(id), 0) AS m FROM messages WHERE room_id = ?'
@@ -752,6 +763,13 @@ export function deleteUser(userId) {
   return tx(userId) > 0;
 }
 
+/** Mark a user onboarded (rules acknowledged). Returns true only on the FIRST
+ *  time (so the caller can fire the one-time "x just joined" announcement). */
+const stmtSetOnboarded = db.prepare('UPDATE users SET onboarded = 1 WHERE id = ? AND onboarded = 0');
+export function setOnboarded(userId) {
+  try { return stmtSetOnboarded.run(userId).changes > 0; } catch { return false; }
+}
+
 /** Set a user's tagline (already validated/capped by caller). */
 export function setTagline(userId, tagline) {
   stmtSetTagline.run(String(tagline).slice(0, CAPS.tagline), userId);
@@ -1024,9 +1042,9 @@ export function findOrCreatePrivateRoom(memberIds) {
  * Persist a chat line. `image` is an optional /uploads/<file> path for an image
  * attachment (null for a plain text line). Returns { id, created_at }.
  */
-export function insertMessage(roomId, userId, username, body, image = null, gif = null) {
+export function insertMessage(roomId, userId, username, body, image = null, gif = null, system = false) {
   const createdAt = Date.now();
-  const info = stmtInsertMessage.run(roomId, userId, username, body, image || null, gif || null, createdAt);
+  const info = stmtInsertMessage.run(roomId, userId, username, body, image || null, gif || null, createdAt, system ? 1 : 0);
   return { id: info.lastInsertRowid, created_at: createdAt };
 }
 
