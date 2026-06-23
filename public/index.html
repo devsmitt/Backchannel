@@ -404,8 +404,8 @@
   .rules-ack { margin-top: 26px; width: 100%; font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; color: var(--bg); background: var(--live); border: none; border-radius: 8px; padding: 13px; font-weight: 600; cursor: pointer; }
   .rules-ack:hover { filter: brightness(1.07); }
 
-  /* system line in the stream ("x just joined") — centered, not a bubble */
-  .sysline { text-align: center; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.03em; color: var(--faint); padding: 10px 0 8px; }
+  /* system line in the stream ("x just joined") — left-aligned in the flow, not a bubble */
+  .sysline { text-align: left; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.03em; color: var(--faint); padding: 10px 0 8px; }
   .sysline .sys-u { color: var(--dim); cursor: pointer; }
   .sysline .sys-u:hover { color: var(--text); }
   .profile { width: 100%; max-width: 520px; background: var(--rail); border: 1px solid var(--line); border-radius: 12px; padding: 0; overflow: hidden; }
@@ -419,7 +419,6 @@
   .profile-since { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-top: 6px; letter-spacing: 0.04em; }
   .profile-usernum { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 4px; letter-spacing: 0.06em; }
   .profile-usernum.gen { color: var(--live); }
-  .gen-star { color: var(--live); font-size: 0.82em; margin-left: 4px; vertical-align: 1px; }
   .profile-tagline { color: var(--dim); margin-top: 12px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
   .profile-tagline.placeholder { color: var(--ghost); font-style: italic; }
 
@@ -726,7 +725,7 @@
           <li>only invite good people.</li>
         </ul>
       </div>
-      <button class="rules-ack" id="rulesAck" type="button">got it — let me in</button>
+      <button class="rules-ack" id="rulesAck" type="button">got it</button>
     </div>
   </div>
 
@@ -1094,7 +1093,6 @@
         '<div class="who">' +
           '<div class="name">' +
             '<span class="handle" style="color:' + colorFor(p.username) + '">@' + esc(p.username) + '</span>' +
-            (p.genesis ? '<span class="gen-star" title="genesis member — one of the first 100">★</span>' : '') +
           '</div>' +
           (p.tagline ? '<div class="doing">' + esc(p.tagline) + '</div>' : '') +
         '</div>';
@@ -1807,8 +1805,7 @@
           (isYou ? '' : '<button class="profile-message" id="msgBtn" title="message @' + esc(u.username) + '">' + MSG_ICON + 'message</button>') +
           '<button class="profile-close" id="pClose">×</button>' +
         '</div>' +
-        '<div class="profile-handle' + (isYou ? ' you' : '') + '" style="color:' + colorFor(u.username) + '">@' + esc(u.username) +
-          (u.genesis ? ' <span class="gen-star" title="genesis member — one of the first 100">★</span>' : '') + '</div>' +
+        '<div class="profile-handle' + (isYou ? ' you' : '') + '" style="color:' + colorFor(u.username) + '">@' + esc(u.username) + '</div>' +
         '<div class="profile-since">building here since ' + esc(sinceStr) + '</div>' +
         (u.userNo ? '<div class="profile-usernum' + (u.genesis ? ' gen' : '') + '">' +
           (u.genesis ? 'genesis member · ' : '') + 'user #' + esc(String(u.userNo)) + '</div>' : '') +
