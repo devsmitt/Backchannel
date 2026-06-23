@@ -54,6 +54,7 @@ import {
   recordExit,
   touchActive,
   allUsersForRoster,
+  isGenesis,
   listChannels,
   roomBySlug,
   roomById,
@@ -404,7 +405,7 @@ function buildRoster(now = Date.now()) {
   const building = [];
   const offline = [];
   for (const u of allUsersForRoster()) {
-    const entry = { username: u.username, tagline: u.tagline || '', streak: u.streak || 0, color: u.color || '' };
+    const entry = { username: u.username, tagline: u.tagline || '', streak: u.streak || 0, color: u.color || '', genesis: isGenesis(u.user_no) };
     const agentActive = isPresent(u.id);
     const recent = u.last_active && now - u.last_active < BUILDING_WINDOW_MS;
     if (agentActive && hasOpenTab(u.id)) {

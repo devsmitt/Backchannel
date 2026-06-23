@@ -39,6 +39,10 @@ const RETENTION_MS = Number(process.env.RETENTION_MS) || 6 * 60 * 60 * 1000;
 // the volume forever. We expire the FILE after this window and leave a placeholder
 // in its place (the message text stays). Default 24h.
 const DM_IMAGE_TTL_MS = Number(process.env.DM_IMAGE_TTL_MS) || 24 * 60 * 60 * 1000;
+// The first GENESIS_CAP accounts ever claimed are "genesis" (founding) members.
+// Everyone has a permanent chronological user_no; genesis is simply user_no <= cap.
+export const GENESIS_CAP = 100;
+export const isGenesis = (userNo) => Number(userNo) > 0 && Number(userNo) <= GENESIS_CAP;
 // Sentinel written into messages.image once the backing file is expired/unlinked,
 // so the client can tell "image expired" apart from "never had an image" (NULL).
 const IMAGE_EXPIRED = 'expired';
@@ -136,7 +140,8 @@ db.exec(`
     streak_days    INTEGER DEFAULT 0,
     last_build_day TEXT    DEFAULT '',
     color          TEXT    DEFAULT '',
-    prefs          TEXT NOT NULL DEFAULT '{}'
+    prefs          TEXT NOT NULL DEFAULT '{}',
+    user_no        INTEGER
   );
 
   -- One identity, many paired environments. Each machine/browser holds its OWN
@@ -297,6 +302,16 @@ function migrate() {
   addColumnIfMissing('users', 'banned', 'banned INTEGER NOT NULL DEFAULT 0');
   // per-user preferences (JSON blob) — currently re-engagement nudge toggles.
   addColumnIfMissing('users', 'prefs', "prefs TEXT NOT NULL DEFAULT '{}'");
+  // permanent chronological "user #N" — assigned at claim, backfilled by id order.
+  addColumnIfMissing('users', 'user_no', 'user_no INTEGER');
+  try {
+    const missing = db.prepare('SELECT id FROM users WHERE user_no IS NULL ORDER BY id ASC, created_at ASC').all();
+    if (missing.length) {
+      let next = db.prepare('SELECT COALESCE(MAX(user_no), 0) AS m FROM users').get().m || 0;
+      const setNo = db.prepare('UPDATE users SET user_no = ? WHERE id = ?');
+      db.transaction(() => { for (const r of missing) setNo.run(++next, r.id); })();
+    }
+  } catch (e) { console.error('[backchannel] user_no backfill:', e); }
   // device_tokens.agent: 1 = a "build" environment (runs the agent hooks / drives
   // presence), 0 = a "view-only" environment. Declared at pair time + backfilled
   // the first time the environment fires /enter.
@@ -383,8 +398,9 @@ function yesterdayOf(day) {
 // ---------------------------------------------------------------------------
 
 const stmtInsertUser = db.prepare(
-  'INSERT INTO users (username, token_hash, recovery_hash, created_at) VALUES (?, ?, ?, ?)'
+  'INSERT INTO users (username, token_hash, recovery_hash, created_at, user_no) VALUES (?, ?, ?, ?, ?)'
 );
+const stmtNextUserNo = db.prepare('SELECT COALESCE(MAX(user_no), 0) + 1 AS n FROM users');
 // Auth resolves a user through their device tokens (one per paired environment).
 const stmtUserByTokenHash = db.prepare(
   'SELECT u.* FROM users u JOIN device_tokens d ON d.user_id = u.id WHERE d.token_hash = ?'
@@ -601,7 +617,10 @@ export function claimWithInvite(username, tokenHash, recoveryHash, code, label =
     const now = Date.now();
     let info;
     try {
-      info = stmtInsertUser.run(username, tokenHash, recoveryHash, now);
+      // Permanent chronological number (1, 2, 3, ...). MAX+1 never reuses a number
+      // even after deletes, so a founding #N stays unique forever.
+      const userNo = stmtNextUserNo.get().n;
+      info = stmtInsertUser.run(username, tokenHash, recoveryHash, now, userNo);
     } catch {
       return { ok: false, error: 'taken' };   // username or token_hash UNIQUE
     }
@@ -862,7 +881,7 @@ export function touchActive(userId, now = Date.now()) {
 export function allUsersForRoster() {
   return db
     .prepare(
-      `SELECT id, username, tagline, streak_days AS streak, last_active, color
+      `SELECT id, username, tagline, streak_days AS streak, last_active, color, user_no
          FROM users
         ORDER BY last_active DESC, username ASC`
     )
@@ -1202,6 +1221,8 @@ export function profileByName(username) {
     buildSeconds: u.build_seconds || 0,
     tagline: u.tagline || '',
     color: u.color || '',
+    userNo: u.user_no || 0,
+    genesis: isGenesis(u.user_no),
     projects: listProjects(u.id),
   };
 }
