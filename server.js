@@ -1928,5 +1928,5 @@ process.on('unhandledRejection', (err) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[backchannel] listening on :${PORT}`);
+  console.log(`[backchannel] listening on :${PORT} (Node ${process.version})`);
 });
